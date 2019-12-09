@@ -1,7 +1,6 @@
 package replicate
 
 import (
-	"fmt"
 	"log"
 	"time"
 

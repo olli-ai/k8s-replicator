@@ -204,7 +204,7 @@ func (r *replicatorProps) needsDataUpdate(object *metav1.ObjectMeta, sourceObjec
 func (r *replicatorProps) needsAnnotationsUpdate(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, error) {
 	update := false
 	// check "from" annotation of the source
-	if source, sOk := resolveAnnotation(ReplicateFromAnnotation); !sOk {
+	if source, sOk := resolveAnnotation(sourceObject, ReplicateFromAnnotation); !sOk {
 		return false, fmt.Errorf("source %s/%s misses annotation %s",
 			sourceObject.Namespace, sourceObject.Name, ReplicateFromAnnotation)
 

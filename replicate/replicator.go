@@ -5,6 +5,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"time"
 
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -370,7 +371,7 @@ func (r *objectReplicator) installObject(target string, targetObject interface{}
 			copyMeta.ResourceVersion = targetMeta.ResourceVersion
 		}
 
-		r.install(&r.replicatorProps, &copyMeta, targetObject)
+		return r.install(&r.replicatorProps, &copyMeta, targetObject)
 
 	} else {
 		if targetMeta != nil {
@@ -390,8 +391,8 @@ func (r *objectReplicator) installObject(target string, targetObject interface{}
 		copyMeta.Annotations[ReplicatedAtAnnotation] = time.Now().Format(time.RFC3339)
 		copyMeta.Annotations[ReplicatedByAnnotation] = fmt.Sprintf("%s/%s",
 			sourceMeta.Namespace, sourceMeta.Name)
-		copyMeta.Annotations[ReplicatedFromVersionAnnotation] = fromMeta.ResourceVersion
-		if val, ok := fromMeta.Annotations[ReplicateOnceVersionAnnotation]; ok {
+		copyMeta.Annotations[ReplicatedFromVersionAnnotation] = sourceMeta.ResourceVersion
+		if val, ok := sourceMeta.Annotations[ReplicateOnceVersionAnnotation]; ok {
 			copyMeta.Annotations[ReplicateOnceVersionAnnotation] = val
 		}
 
