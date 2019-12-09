@@ -180,15 +180,6 @@ func (*secretActions) install(r *replicatorProps, meta *metav1.ObjectMeta, sourc
 
 	log.Printf("installing secret %s/%s", secret.Namespace, secret.Name)
 
-	secret.Annotations = map[string]string{}
-	secret.Annotations[ReplicatedAtAnnotation] = time.Now().Format(time.RFC3339)
-	secret.Annotations[ReplicatedByAnnotation] = fmt.Sprintf("%s/%s",
-		sourceSecret.Namespace, sourceSecret.Name)
-	secret.Annotations[ReplicatedFromVersionAnnotation] = sourceSecret.ResourceVersion
-	if val, ok := sourceSecret.Annotations[ReplicateOnceVersionAnnotation]; ok {
-		secret.Annotations[ReplicateOnceVersionAnnotation] = val
-	}
-
 	var s *v1.Secret
 	var err error
 	if secret.ResourceVersion == "" {

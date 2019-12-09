@@ -196,15 +196,6 @@ func (*configMapActions) install(r *replicatorProps, meta *metav1.ObjectMeta, so
 
 	log.Printf("installing config map %s/%s", configMap.Namespace, configMap.Name)
 
-	configMap.Annotations = map[string]string{}
-	configMap.Annotations[ReplicatedAtAnnotation] = time.Now().Format(time.RFC3339)
-	configMap.Annotations[ReplicatedByAnnotation] = fmt.Sprintf("%s/%s",
-		sourceConfigMap.Namespace, sourceConfigMap.Name)
-	configMap.Annotations[ReplicatedFromVersionAnnotation] = sourceConfigMap.ResourceVersion
-	if val, ok := sourceConfigMap.Annotations[ReplicateOnceVersionAnnotation]; ok {
-		configMap.Annotations[ReplicateOnceVersionAnnotation] = val
-	}
-
 	var s *v1.ConfigMap
 	var err error
 	if configMap.ResourceVersion == "" {
