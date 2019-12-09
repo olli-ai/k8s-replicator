@@ -198,13 +198,27 @@ Targets:
 			log.Printf("source %s %s is not replicated to %s: deleting target", r.Name, val, key)
 			exists = false
 		}
-
-		if exists {
-			r.installObject("", object, sourceObject)
-		} else {
+		// no source, delete it
+		if !exists {
 			r.doDeleteObject(object)
+			return
+		// source is here, install it
+		} else if err := r.installObject("", object, sourceObject); err == nil {
+			return
+		// get it back after edit
+		} else if obj, m, err := r.objectFromStore(key); err != nil {
+			log.Printf("could not get %s %s: %s", r.Name, key, err)
+			return
+		// look for "from" annotation
+		} else if _, ok := m.Annotations[ReplicateFromAnnotation]; !ok {
+			return
+		// if found, continue until the "from" check
+		} else {
+			object = obj
+			meta = m
+			targets = nil
+			targetPatterns = nil
 		}
-		return
 	}
 	// this object is replicated to other locations
 	if targets != nil || targetPatterns != nil {
