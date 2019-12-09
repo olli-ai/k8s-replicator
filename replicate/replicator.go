@@ -85,8 +85,6 @@ func (r *objectReplicator) replicateToNamespace(object interface{}, namespace st
 	// those annotations have priority
 	if _, ok := meta.Annotations[ReplicatedByAnnotation]; ok {
 		return
-	} else if _, ok := meta.Annotations[ReplicateFromAnnotation]; ok {
-		return
 	}
 	// get all targets
 	targets, targetPatterns, err := r.getReplicationTargets(meta)
