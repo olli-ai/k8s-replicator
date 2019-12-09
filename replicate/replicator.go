@@ -5,6 +5,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"time"
 
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,7 +16,7 @@ type replicatorActions interface {
 	getMeta(object interface{}) *metav1.ObjectMeta
 	update(r *replicatorProps, object interface{}, sourceObject interface{}) error
 	clear(r *replicatorProps, object interface{}) error
-	install(r *replicatorProps, meta *metav1.ObjectMeta, sourceObject interface{}) error
+	install(r *replicatorProps, meta *metav1.ObjectMeta, sourceObject interface{}, dataObject interface{}) error
 	delete(r *replicatorProps, meta interface{}) error
 }
 
@@ -41,7 +42,7 @@ func (r *objectReplicator) NamespaceAdded(object interface{}) {
 
 	for source, watched := range r.watchedTargets {
 		for _, ns := range watched {
-			if namespace.Name == strings.SplitN(ns, "/", 1)[0] {
+			if namespace.Name == strings.SplitN(ns, "/", 2)[0] {
 				todo[source] = true
 				break
 			}
@@ -83,8 +84,6 @@ func (r *objectReplicator) replicateToNamespace(object interface{}, namespace st
 	key := fmt.Sprintf("%s/%s", meta.Namespace, meta.Name)
 	// those annotations have priority
 	if _, ok := meta.Annotations[ReplicatedByAnnotation]; ok {
-		return
-	} else if _, ok := meta.Annotations[ReplicateFromAnnotation]; ok {
 		return
 	}
 	// get all targets
@@ -197,39 +196,30 @@ Targets:
 			log.Printf("source %s %s is not replicated to %s: deleting target", r.Name, val, key)
 			exists = false
 		}
-
-		if exists {
-			r.installObject("", object, sourceObject)
-		} else {
+		// no source, delete it
+		if !exists {
 			r.doDeleteObject(object)
-		}
-		return
-	}
-	// this object is replicated from another, update it
-	if val, ok := resolveAnnotation(meta, ReplicateFromAnnotation); ok {
-		log.Printf("%s %s is replicated from %s", r.Name, key, val)
-		// update the dependencies of the source, even if it maybe does not exist yet
-		if _, ok := r.targetsFrom[val]; !ok {
-			r.targetsFrom[val] = make([]string, 0, 1)
-		}
-		r.targetsFrom[val] = append(r.targetsFrom[val], key)
-
-		if sourceObject, exists, err := r.objectStore.GetByKey(val); err != nil {
-			log.Printf("could not get %s %s: %s", r.Name, val, err)
 			return
-		// the source does not exist anymore/yet, clear the data of the target
-		} else if !exists {
-			log.Printf("source %s %s deleted: clearing target %s", r.Name, val, key)
-			r.doClearObject(object)
+		// source is here, install it
+		} else if err := r.installObject("", object, sourceObject); err != nil {
 			return
-		// update the target
+		// get it back after edit
+		} else if obj, m, err := r.objectFromStore(key); err != nil {
+			log.Printf("could not get %s %s: %s", r.Name, key, err)
+			return
+		// look for "from" annotation
+		} else if _, ok := m.Annotations[ReplicateFromAnnotation]; !ok {
+			return
+		// if found, continue until the "from" check
 		} else {
-			r.replicateObject(object, sourceObject)
-			return
+			object = obj
+			meta = m
+			targets = nil
+			targetPatterns = nil
 		}
 	}
 	// this object is replicated to other locations
-	if len(targets) > 0 || len(targetPatterns) > 0 {
+	if targets != nil || targetPatterns != nil {
 		existsNamespaces := map[string]bool{} // a cache to remember the done lookups
 		existingTargets := []string{} // the slice of all the target this object should replicate to
 
@@ -289,18 +279,41 @@ Targets:
 
 		return
 	}
+	// this object is replicated from another, update it
+	if val, ok := resolveAnnotation(meta, ReplicateFromAnnotation); ok {
+		log.Printf("%s %s is replicated from %s", r.Name, key, val)
+		// update the dependencies of the source, even if it maybe does not exist yet
+		if _, ok := r.targetsFrom[val]; !ok {
+			r.targetsFrom[val] = make([]string, 0, 1)
+		}
+		r.targetsFrom[val] = append(r.targetsFrom[val], key)
+
+		if sourceObject, exists, err := r.objectStore.GetByKey(val); err != nil {
+			log.Printf("could not get %s %s: %s", r.Name, val, err)
+			return
+		// the source does not exist anymore/yet, clear the data of the target
+		} else if !exists {
+			log.Printf("source %s %s deleted: clearing target %s", r.Name, val, key)
+			r.doClearObject(object)
+			return
+		// update the target
+		} else {
+			r.replicateObject(object, sourceObject)
+			return
+		}
+	}
 }
 
 func (r *objectReplicator) replicateObject(object interface{}, sourceObject  interface{}) error {
 	meta := r.getMeta(object)
 	sourceMeta := r.getMeta(sourceObject)
 	// make sure replication is allowed
-	if ok, err := r.isReplicationPermitted(meta, sourceMeta); !ok {
+	if ok, err := r.isReplicationAllowed(meta, sourceMeta); !ok {
 		log.Printf("replication of %s %s/%s is cancelled: %s", r.Name, meta.Namespace, meta.Name, err)
 		return err
 	}
 
-	if ok, err := r.needsUpdate(meta, sourceMeta); !ok {
+	if ok, err := r.needsDataUpdate(meta, sourceMeta); !ok {
 		log.Printf("replication of %s %s/%s is skipped: %s", r.Name, meta.Namespace, meta.Name, err)
 		return err
 	}
@@ -323,11 +336,12 @@ func (r *objectReplicator) installObject(target string, targetObject interface{}
 			return err
 		}
 
-		if targetObject, exists, err := r.objectStore.GetByKey(target); err != nil {
+		if obj, exists, err := r.objectStore.GetByKey(target); err != nil {
 			log.Printf("could not get %s %s: %s", r.Name, target, err)
 			return err
 
 		} else if exists {
+			targetObject = obj
 			targetMeta = r.getMeta(targetObject)
 			if ok, err := r.isReplicatedBy(targetMeta, sourceMeta); !ok {
 				log.Printf("replication of %s %s/%s is cancelled: %s",
@@ -340,25 +354,66 @@ func (r *objectReplicator) installObject(target string, targetObject interface{}
 		targetSplit = []string{targetMeta.Namespace, targetMeta.Name}
 	}
 
-	if targetMeta != nil {
-		if ok, err := r.needsUpdate(targetMeta, sourceMeta); !ok {
-			log.Printf("replication of %s %s/%s is skipped: %s",
-				r.Name, sourceMeta.Namespace, sourceMeta.Name, err)
-			return err
+	if source, ok := resolveAnnotation(sourceMeta, ReplicateFromAnnotation); ok {
+		if targetMeta != nil {
+			if ok, err := r.needsAnnotationsUpdate(targetMeta, sourceMeta); err != nil {
+				log.Printf("replication of %s %s/%s is cancelled: %s",
+					r.Name, sourceMeta.Namespace, sourceMeta.Name, err)
+				return err
+
+			} else if !ok {
+				return nil
+			}
 		}
-	}
 
-	copyMeta := metav1.ObjectMeta{
-		Namespace:   targetSplit[0],
-		Name:        targetSplit[1],
-		Annotations: map[string]string{},
-	}
+		copyMeta := metav1.ObjectMeta{
+			Namespace:   targetSplit[0],
+			Name:        targetSplit[1],
+			Annotations: map[string]string{},
+		}
 
-	if targetMeta != nil {
-		copyMeta.ResourceVersion = targetMeta.ResourceVersion
-	}
+		copyMeta.Annotations[ReplicatedByAnnotation] = fmt.Sprintf("%s/%s",
+			sourceMeta.Namespace, sourceMeta.Name)
+		copyMeta.Annotations[ReplicateFromAnnotation] = source
+		if val, ok := sourceMeta.Annotations[ReplicateOnceAnnotation]; ok {
+			copyMeta.Annotations[ReplicateOnceAnnotation] = val
+		}
 
-	return r.install(&r.replicatorProps, &copyMeta, sourceObject)
+		if targetMeta != nil {
+			copyMeta.ResourceVersion = targetMeta.ResourceVersion
+		}
+
+		return r.install(&r.replicatorProps, &copyMeta, sourceObject, targetObject)
+
+	} else {
+		if targetMeta != nil {
+			if ok, err := r.needsDataUpdate(targetMeta, sourceMeta); !ok {
+				log.Printf("replication of %s %s/%s is skipped: %s",
+					r.Name, sourceMeta.Namespace, sourceMeta.Name, err)
+				return err
+			}
+		}
+
+		copyMeta := metav1.ObjectMeta{
+			Namespace:   targetSplit[0],
+			Name:        targetSplit[1],
+			Annotations: map[string]string{},
+		}
+
+		copyMeta.Annotations[ReplicatedAtAnnotation] = time.Now().Format(time.RFC3339)
+		copyMeta.Annotations[ReplicatedByAnnotation] = fmt.Sprintf("%s/%s",
+			sourceMeta.Namespace, sourceMeta.Name)
+		copyMeta.Annotations[ReplicatedFromVersionAnnotation] = sourceMeta.ResourceVersion
+		if val, ok := sourceMeta.Annotations[ReplicateOnceVersionAnnotation]; ok {
+			copyMeta.Annotations[ReplicateOnceVersionAnnotation] = val
+		}
+
+		if targetMeta != nil {
+			copyMeta.ResourceVersion = targetMeta.ResourceVersion
+		}
+
+		return r.install(&r.replicatorProps, &copyMeta, sourceObject, sourceObject)
+	}
 }
 
 func (r *objectReplicator) objectFromStore(key string) (interface{}, *metav1.ObjectMeta, error) {
@@ -487,12 +542,7 @@ func (r *objectReplicator) ObjectDeleted(object interface{}) {
 			log.Printf("could not parse %s %s: %s", r.Name, source, err)
 		// the source sitll want to be replicated, so let's do it
 		} else if ok {
-			copyMeta := metav1.ObjectMeta{
-				Namespace:   meta.Namespace,
-				Name:        meta.Name,
-				Annotations: map[string]string{},
-			}
-			r.install(&r.replicatorProps, &copyMeta, sourceObject)
+			r.installObject(key, nil, sourceObject)
 			break
 		}
 	}

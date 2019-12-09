@@ -13,7 +13,8 @@ import (
 )
 
 // pattern of a valid kubernetes name
-var validName = regexp.MustCompile(`^[0-9a-z.-]*$`)
+var validName = regexp.MustCompile(`^[0-9a-z.-]+$`)
+var validPath = regexp.MustCompile(`^[0-9a-z.-]+/[0-9a-z.-]+$`)
 
 // a struct representing a pattern to match namespaces and generating targets
 type targetPattern struct {
@@ -87,7 +88,7 @@ type Replicator interface {
 // It means that replication-allowes and replications-allowed-namespaces are correct
 // Returns true if replication is allowed.
 // If replication is not allowed returns false with error message
-func (r *replicatorProps) isReplicationPermitted(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, error) {
+func (r *replicatorProps) isReplicationAllowed(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, error) {
 	annotationAllowed, ok := sourceObject.Annotations[ReplicationAllowed]
 	annotationAllowedNs, okNs := sourceObject.Annotations[ReplicationAllowedNamespaces]
 	// unless allowAll, explicit permission is required
@@ -130,10 +131,10 @@ func (r *replicatorProps) isReplicationPermitted(object *metav1.ObjectMeta, sour
 	return true, nil
 }
 
-// Checks that update is needed in annotations of the target and source objects
+// Checks that data update is needed
 // Returns true if update is needed
 // If update is not needed returns false with error message
-func (r *replicatorProps) needsUpdate(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, error) {
+func (r *replicatorProps) needsDataUpdate(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, error) {
 	// target was "replicated" from a delete source, or never replicated
 	if targetVersion, ok := object.Annotations[ReplicatedFromVersionAnnotation]; !ok {
 		return true, nil
@@ -195,6 +196,40 @@ func (r *replicatorProps) needsUpdate(object *metav1.ObjectMeta, sourceObject *m
 	}
 
 	return true, nil
+}
+
+// Checks that data annotation is needed
+// Returns true if update is needed
+// Return an error only if a source annotation is illformed
+func (r *replicatorProps) needsAnnotationsUpdate(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, error) {
+	update := false
+	// check "from" annotation of the source
+	if source, sOk := resolveAnnotation(sourceObject, ReplicateFromAnnotation); !sOk {
+		return false, fmt.Errorf("source %s/%s misses annotation %s",
+			sourceObject.Namespace, sourceObject.Name, ReplicateFromAnnotation)
+
+	} else if !validPath.MatchString(source) {
+		return false, fmt.Errorf("source %s/%s has invalid annotation %s (%s)",
+			sourceObject.Namespace, sourceObject.Name, ReplicateFromAnnotation, source)
+	// check that target has the same annotation
+	} else if val, ok := object.Annotations[ReplicateFromAnnotation]; !ok || val != source {
+		update = true
+	}
+
+	source, sOk := sourceObject.Annotations[ReplicateOnceAnnotation]
+	// check "once" annotation of the source
+	if sOk {
+		if _, err := strconv.ParseBool(source); err != nil {
+			return false, fmt.Errorf("source %s/%s has illformed annotation %s: %s",
+				sourceObject.Namespace, sourceObject.Name, ReplicateOnceAnnotation, err)
+		}
+	}
+	// check that target has the same annotation
+	if val, ok := object.Annotations[ReplicateOnceAnnotation]; sOk != ok || ok && val != source {
+		update = true
+	}
+
+	return update, nil
 }
 
 // Checks that replication from the source object to the target objects is allowed

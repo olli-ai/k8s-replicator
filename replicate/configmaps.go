@@ -1,7 +1,6 @@
 package replicate
 
 import (
-	"fmt"
 	"log"
 	"time"
 
@@ -168,7 +167,7 @@ func (*configMapActions) clear(r *replicatorProps, object interface{}) error {
 	return nil
 }
 
-func (*configMapActions) install(r *replicatorProps, meta *metav1.ObjectMeta, sourceObject interface{}) error {
+func (*configMapActions) install(r *replicatorProps, meta *metav1.ObjectMeta, sourceObject interface{}, dataObject interface{}) error {
 	sourceConfigMap := sourceObject.(*v1.ConfigMap)
 	configMap := v1.ConfigMap{
 		TypeMeta: metav1.TypeMeta{
@@ -178,32 +177,27 @@ func (*configMapActions) install(r *replicatorProps, meta *metav1.ObjectMeta, so
 		ObjectMeta: *meta,
 	}
 
-	if sourceConfigMap.Data != nil {
-		configMap.Data = make(map[string]string)
-		for key, value := range sourceConfigMap.Data {
-			configMap.Data[key] = value
-		}
-	}
+	if dataObject != nil {
+		dataConfigMap := dataObject.(*v1.ConfigMap)
 
-	if sourceConfigMap.BinaryData != nil {
-		configMap.BinaryData = make(map[string][]byte)
-		for key, value := range sourceConfigMap.BinaryData {
-			newValue := make([]byte, len(value))
-			copy(newValue, value)
-			configMap.BinaryData[key] = newValue
+		if dataConfigMap.Data != nil {
+			configMap.Data = make(map[string]string)
+			for key, value := range dataConfigMap.Data {
+				configMap.Data[key] = value
+			}
+		}
+
+		if dataConfigMap.BinaryData != nil {
+			configMap.BinaryData = make(map[string][]byte)
+			for key, value := range dataConfigMap.BinaryData {
+				newValue := make([]byte, len(value))
+				copy(newValue, value)
+				configMap.BinaryData[key] = newValue
+			}
 		}
 	}
 
 	log.Printf("installing config map %s/%s", configMap.Namespace, configMap.Name)
-
-	configMap.Annotations = map[string]string{}
-	configMap.Annotations[ReplicatedAtAnnotation] = time.Now().Format(time.RFC3339)
-	configMap.Annotations[ReplicatedByAnnotation] = fmt.Sprintf("%s/%s",
-		sourceConfigMap.Namespace, sourceConfigMap.Name)
-	configMap.Annotations[ReplicatedFromVersionAnnotation] = sourceConfigMap.ResourceVersion
-	if val, ok := sourceConfigMap.Annotations[ReplicateOnceVersionAnnotation]; ok {
-		configMap.Annotations[ReplicateOnceVersionAnnotation] = val
-	}
 
 	var s *v1.ConfigMap
 	var err error
