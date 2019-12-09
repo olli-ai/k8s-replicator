@@ -42,7 +42,7 @@ func (r *objectReplicator) NamespaceAdded(object interface{}) {
 
 	for source, watched := range r.watchedTargets {
 		for _, ns := range watched {
-			if namespace.Name == strings.SplitN(ns, "/", 1)[0] {
+			if namespace.Name == strings.SplitN(ns, "/", 2)[0] {
 				todo[source] = true
 				break
 			}
