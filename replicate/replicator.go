@@ -16,7 +16,7 @@ type replicatorActions interface {
 	getMeta(object interface{}) *metav1.ObjectMeta
 	update(r *replicatorProps, object interface{}, sourceObject interface{}) error
 	clear(r *replicatorProps, object interface{}) error
-	install(r *replicatorProps, meta *metav1.ObjectMeta, sourceObject interface{}) error
+	install(r *replicatorProps, meta *metav1.ObjectMeta, sourceObject interface{}, dataObject interface{}) error
 	delete(r *replicatorProps, meta interface{}) error
 }
 
@@ -371,7 +371,7 @@ func (r *objectReplicator) installObject(target string, targetObject interface{}
 			copyMeta.ResourceVersion = targetMeta.ResourceVersion
 		}
 
-		return r.install(&r.replicatorProps, &copyMeta, targetObject)
+		return r.install(&r.replicatorProps, &copyMeta, sourceObject, targetObject)
 
 	} else {
 		if targetMeta != nil {
@@ -400,7 +400,7 @@ func (r *objectReplicator) installObject(target string, targetObject interface{}
 			copyMeta.ResourceVersion = targetMeta.ResourceVersion
 		}
 
-		return r.install(&r.replicatorProps, &copyMeta, sourceObject)
+		return r.install(&r.replicatorProps, &copyMeta, sourceObject, sourceObject)
 	}
 }
 

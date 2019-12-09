@@ -167,7 +167,7 @@ func (*configMapActions) clear(r *replicatorProps, object interface{}) error {
 	return nil
 }
 
-func (*configMapActions) install(r *replicatorProps, meta *metav1.ObjectMeta, sourceObject interface{}) error {
+func (*configMapActions) install(r *replicatorProps, meta *metav1.ObjectMeta, sourceObject interface{}, dataObject interface{}) error {
 	sourceConfigMap := sourceObject.(*v1.ConfigMap)
 	configMap := v1.ConfigMap{
 		TypeMeta: metav1.TypeMeta{
@@ -177,19 +177,23 @@ func (*configMapActions) install(r *replicatorProps, meta *metav1.ObjectMeta, so
 		ObjectMeta: *meta,
 	}
 
-	if sourceConfigMap.Data != nil {
-		configMap.Data = make(map[string]string)
-		for key, value := range sourceConfigMap.Data {
-			configMap.Data[key] = value
-		}
-	}
+	if dataObject != nil {
+		dataConfigMap := dataObject.(*v1.ConfigMap)
 
-	if sourceConfigMap.BinaryData != nil {
-		configMap.BinaryData = make(map[string][]byte)
-		for key, value := range sourceConfigMap.BinaryData {
-			newValue := make([]byte, len(value))
-			copy(newValue, value)
-			configMap.BinaryData[key] = newValue
+		if dataConfigMap.Data != nil {
+			configMap.Data = make(map[string]string)
+			for key, value := range dataConfigMap.Data {
+				configMap.Data[key] = value
+			}
+		}
+
+		if dataConfigMap.BinaryData != nil {
+			configMap.BinaryData = make(map[string][]byte)
+			for key, value := range dataConfigMap.BinaryData {
+				newValue := make([]byte, len(value))
+				copy(newValue, value)
+				configMap.BinaryData[key] = newValue
+			}
 		}
 	}
 
