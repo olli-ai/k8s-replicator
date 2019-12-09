@@ -133,7 +133,6 @@ func (r *objectReplicator) replicateToNamespace(object interface{}, namespace st
 func (r *objectReplicator) ObjectAdded(object interface{}) {
 	meta := r.getMeta(object)
 	key := fmt.Sprintf("%s/%s", meta.Namespace, meta.Name)
-	fmt.Printf("ObjectAdded %s\n", key)
 	// get replication targets
 	targets, targetPatterns, err := r.getReplicationTargets(meta)
 	if err != nil {
@@ -201,12 +200,10 @@ Targets:
 		}
 		// no source, delete it
 		if !exists {
-			fmt.Printf("doDeleteObject\n")
 			r.doDeleteObject(object)
 			return
 		// source is here, install it
-		} else if err := r.installObject("", object, sourceObject); err == nil {
-			fmt.Printf("installObject err\n")
+		} else if err := r.installObject("", object, sourceObject); err != nil {
 			return
 		// get it back after edit
 		} else if obj, m, err := r.objectFromStore(key); err != nil {
@@ -214,18 +211,15 @@ Targets:
 			return
 		// look for "from" annotation
 		} else if _, ok := m.Annotations[ReplicateFromAnnotation]; !ok {
-			fmt.Printf("ReplicateFromAnnotation !ok\n")
 			return
 		// if found, continue until the "from" check
 		} else {
-			fmt.Printf("else\n")
 			object = obj
 			meta = m
 			targets = nil
 			targetPatterns = nil
 		}
 	}
-	fmt.Printf("targets || targetPatterns != nil: %s\n", targets != nil || targetPatterns != nil)
 	// this object is replicated to other locations
 	if targets != nil || targetPatterns != nil {
 		existsNamespaces := map[string]bool{} // a cache to remember the done lookups
@@ -287,7 +281,6 @@ Targets:
 
 		return
 	}
-	fmt.Printf("meta.Annotations[ReplicateFromAnnotation]: %s\n", meta.Annotations[ReplicateFromAnnotation])
 	// this object is replicated from another, update it
 	if val, ok := resolveAnnotation(meta, ReplicateFromAnnotation); ok {
 		log.Printf("%s %s is replicated from %s", r.Name, key, val)
