@@ -230,7 +230,7 @@ Targets:
 			// already in cache
 			if exists, ok = existsNamespaces[ns]; ok {
 			// get it
-			} else if _, exists, err := r.namespaceStore.GetByKey(ns); err == nil {
+			} else if _, exists, err = r.namespaceStore.GetByKey(ns); err == nil {
 				log.Printf("=== r.namespaceStore.GetByKey(%s): %s", ns, exists)
 				existsNamespaces[ns] = exists
 			}
