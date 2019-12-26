@@ -127,6 +127,10 @@ func (r *replicatorProps) isReplicationAllowed(object *metav1.ObjectMeta, source
 				sourceObject.Namespace, sourceObject.Name, object.Namespace)
 		}
 	}
+	// source cannot have "replicate-from" annotation
+	if val, ok := resolveAnnotation(sourceObject, ReplicateFromAnnotation); ok {
+		return false, fmt.Errorf("source %s/%s is already replicated from %s")
+	}
 
 	return true, nil
 }
@@ -208,9 +212,11 @@ func (r *replicatorProps) needsAnnotationsUpdate(object *metav1.ObjectMeta, sour
 		return false, fmt.Errorf("source %s/%s misses annotation %s",
 			sourceObject.Namespace, sourceObject.Name, ReplicateFromAnnotation)
 
-	} else if !validPath.MatchString(source) {
+	} else if !validPath.MatchString(source) ||
+			source == fmt.Sprintf("%s/%s", sourceObject.Namespace, sourceObject.Name) {
 		return false, fmt.Errorf("source %s/%s has invalid annotation %s (%s)",
 			sourceObject.Namespace, sourceObject.Name, ReplicateFromAnnotation, source)
+
 	// check that target has the same annotation
 	} else if val, ok := object.Annotations[ReplicateFromAnnotation]; !ok || val != source {
 		update = true
