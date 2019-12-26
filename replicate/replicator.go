@@ -38,8 +38,6 @@ func (r *objectReplicator) Start() {
 func (r *objectReplicator) NamespaceAdded(object interface{}) {
 	namespace := object.(*v1.Namespace)
 	log.Printf("new namespace %s", namespace.Name)
-	_, exists, err := r.namespaceStore.GetByKey(namespace.Name)
-	log.Printf("=== r.namespaceStore.GetByKey(%s): %s %s", namespace.Name, exists, err)
 	// find all the objects which want to replicate to that namespace
 	todo := map[string]bool{}
 
@@ -231,7 +229,6 @@ Targets:
 			if exists, ok = existsNamespaces[ns]; ok {
 			// get it
 			} else if _, exists, err = r.namespaceStore.GetByKey(ns); err == nil {
-				log.Printf("=== r.namespaceStore.GetByKey(%s): %s", ns, exists)
 				existsNamespaces[ns] = exists
 			}
 
