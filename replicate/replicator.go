@@ -37,6 +37,7 @@ func (r *objectReplicator) Start() {
 
 func (r *objectReplicator) NamespaceAdded(object interface{}) {
 	namespace := object.(*v1.Namespace)
+	log.Printf("new namespace %s", namespace.Name)
 	// find all the objects which want to replicate to that namespace
 	todo := map[string]bool{}
 
