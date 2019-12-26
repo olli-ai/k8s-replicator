@@ -54,14 +54,10 @@ func main() {
 	secretRepl := replicate.NewSecretReplicator(client, f.ResyncPeriod, f.AllowAll)
 	configMapRepl := replicate.NewConfigMapReplicator(client, f.ResyncPeriod, f.AllowAll)
 
-	// go func() {
-	// 	secretRepl.Run()
-	// }()
+	log.Printf("Starting replicators with prefix \"%s\"", f.AnnotationsPrefix)
+
 	secretRepl.Start()
 
-	// go func() {
-	// 	configMapRepl.Run()
-	// }()
 	configMapRepl.Start()
 
 	h := liveness.Handler{
