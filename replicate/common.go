@@ -129,7 +129,8 @@ func (r *replicatorProps) isReplicationAllowed(object *metav1.ObjectMeta, source
 	}
 	// source cannot have "replicate-from" annotation
 	if val, ok := resolveAnnotation(sourceObject, ReplicateFromAnnotation); ok {
-		return false, fmt.Errorf("source %s/%s is already replicated from %s")
+		return false, fmt.Errorf("source %s/%s is already replicated from %s",
+			sourceObject.Namespace, sourceObject.Name, val)
 	}
 
 	return true, nil
