@@ -139,13 +139,13 @@ func (r *replicatorProps) isReplicationAllowed(object *metav1.ObjectMeta, source
 // Checks that data update is needed
 // Returns true if update is needed
 // If update is not needed returns false with error message
-func (r *replicatorProps) needsDataUpdate(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, error) {
+func (r *replicatorProps) needsDataUpdate(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, bool, error) {
 	// target was "replicated" from a delete source, or never replicated
 	if targetVersion, ok := object.Annotations[ReplicatedFromVersionAnnotation]; !ok {
-		return true, nil
+		return true, false, nil
 	// target and source share the same version
 	} else if ok && targetVersion == sourceObject.ResourceVersion {
-		return false, fmt.Errorf("target %s/%s is already up-to-date", object.Namespace, object.Name)
+		return false, false, fmt.Errorf("target %s/%s is already up-to-date", object.Namespace, object.Name)
 	}
 
 	hasOnce := false
@@ -153,7 +153,7 @@ func (r *replicatorProps) needsDataUpdate(object *metav1.ObjectMeta, sourceObjec
 	if annotationOnce, ok := sourceObject.Annotations[ReplicateOnceAnnotation]; !ok {
 	// once annotation is not a boolean
 	} else if once, err := strconv.ParseBool(annotationOnce); err != nil {
-		return false, fmt.Errorf("source %s/%s has illformed annotation %s: %s",
+		return false, false, fmt.Errorf("source %s/%s has illformed annotation %s: %s",
 			sourceObject.Namespace, sourceObject.Name, ReplicateOnceAnnotation, err)
 	// once annotation is present
 	} else if once {
@@ -163,7 +163,7 @@ func (r *replicatorProps) needsDataUpdate(object *metav1.ObjectMeta, sourceObjec
 	if annotationOnce, ok := object.Annotations[ReplicateOnceAnnotation]; !ok {
 	// once annotation is not a boolean
 	} else if once, err := strconv.ParseBool(annotationOnce); err != nil {
-		return false, fmt.Errorf("target %s/%s has illformed annotation %s: %s",
+		return false, false, fmt.Errorf("target %s/%s has illformed annotation %s: %s",
 			object.Namespace, object.Name, ReplicateOnceAnnotation, err)
 	// once annotation is present
 	} else if once {
@@ -175,7 +175,7 @@ func (r *replicatorProps) needsDataUpdate(object *metav1.ObjectMeta, sourceObjec
 	} else if annotationVersion, ok := sourceObject.Annotations[ReplicateOnceVersionAnnotation]; !ok {
 	// once version annotation is not a valid version
 	} else if sourceVersion, err := semver.NewVersion(annotationVersion); err != nil {
-		return false, fmt.Errorf("source %s/%s has illformed annotation %s: %s",
+		return false, false, fmt.Errorf("source %s/%s has illformed annotation %s: %s",
 			sourceObject.Namespace, sourceObject.Name, ReplicateOnceVersionAnnotation, err)
 	// the source has a once version annotation but it is "0.0.0" anyway
 	} else if version0, _ := semver.NewVersion("0"); sourceVersion.Equal(version0) {
@@ -184,29 +184,29 @@ func (r *replicatorProps) needsDataUpdate(object *metav1.ObjectMeta, sourceObjec
 		hasOnce = false
 	// once version annotation is not a valid version
 	} else if targetVersion, err := semver.NewVersion(annotationVersion); err != nil {
-		return false, fmt.Errorf("target %s/%s has illformed annotation %s: %s",
+		return false, false, fmt.Errorf("target %s/%s has illformed annotation %s: %s",
 			object.Namespace, object.Name, ReplicateOnceVersionAnnotation, err)
 	// source version is greatwe than source version, should update
 	} else if sourceVersion.GreaterThan(targetVersion) {
 		hasOnce = false
 	// source version is not greater than target version
 	} else {
-		return false, fmt.Errorf("target %s/%s is already replicated once at version %s",
+		return false, true, fmt.Errorf("target %s/%s is already replicated once at version %s",
 			object.Namespace, object.Name, sourceVersion)
 	}
 
 	if hasOnce {
-		return false, fmt.Errorf("target %s/%s is already replicated once",
+		return false, true, fmt.Errorf("target %s/%s is already replicated once",
 			object.Namespace, object.Name)
 	}
 
-	return true, nil
+	return true, false, nil
 }
 
 // Checks that data annotation is needed
 // Returns true if update is needed
 // Return an error only if a source annotation is illformed
-func (r *replicatorProps) needsAnnotationsUpdate(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, error) {
+func (r *replicatorProps) needsFromAnnotationsUpdate(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, error) {
 	update := false
 	// check "from" annotation of the source
 	if source, sOk := resolveAnnotation(sourceObject, ReplicateFromAnnotation); !sOk {
@@ -237,6 +237,44 @@ func (r *replicatorProps) needsAnnotationsUpdate(object *metav1.ObjectMeta, sour
 	}
 
 	return update, nil
+}
+
+func (r *replicatorProps) needsAllowedAnnotationsUpdate(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, error) {
+	update := false
+
+	allowed, okA := sourceObject.Annotations[ReplicationAllowed]
+	if val, ok := object.Annotations[ReplicationAllowed]; ok != okA || ok && val != allowed {
+		update = true
+	}
+
+	allowedNs, okNs := sourceObject.Annotations[ReplicationAllowedNamespaces]
+	if val, ok := object.Annotations[ReplicationAllowedNamespaces]; ok != okNs || ok && val != allowedNs {
+		update = true
+	}
+
+	if !update {
+		return false, nil
+	}
+
+	// check allow annotation
+	if okA {
+		if _, err := strconv.ParseBool(allowed); err != nil {
+			return false, fmt.Errorf("source %s/%s has illformed annotation %s (%s): %s",
+				sourceObject.Namespace, sourceObject.Name, ReplicationAllowed, allowed, err)
+		}
+	}
+	// check allow-namespaces annotation
+	if okNs {
+		for _, ns := range strings.Split(allowedNs, ",") {
+			if ns == "" || validName.MatchString(ns) {
+			} else if _, err := regexp.Compile(`^(?:`+ns+`)$`); err != nil {
+				return false, fmt.Errorf("source %s/%s has compilation error on annotation %s (%s): %s",
+					sourceObject.Namespace, sourceObject.Name, ReplicationAllowedNamespaces, ns, err)
+			}
+		}
+	}
+
+	return true, nil
 }
 
 // Checks that replication from the source object to the target objects is allowed
