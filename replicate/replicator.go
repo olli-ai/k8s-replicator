@@ -312,7 +312,7 @@ func (r *objectReplicator) replicateObject(object interface{}, sourceObject  int
 		return err
 	}
 	// check if replication is needed
-	if ok, err := r.needsDataUpdate(meta, sourceMeta); !ok {
+	if ok, _, err := r.needsDataUpdate(meta, sourceMeta); !ok {
 		log.Printf("replication of %s %s/%s is skipped: %s", r.Name, meta.Namespace, meta.Name, err)
 		return err
 	}
@@ -359,7 +359,7 @@ func (r *objectReplicator) installObject(target string, targetObject interface{}
 	if source, ok := resolveAnnotation(sourceMeta, ReplicateFromAnnotation); ok {
 		if targetMeta != nil {
 			// Check if needs an annotations update
-			if ok, err := r.needsAnnotationsUpdate(targetMeta, sourceMeta); err != nil {
+			if ok, err := r.needsFromAnnotationsUpdate(targetMeta, sourceMeta); err != nil {
 				log.Printf("replication of %s %s/%s is cancelled: %s",
 					r.Name, sourceMeta.Namespace, sourceMeta.Name, err)
 				return err
@@ -387,47 +387,69 @@ func (r *objectReplicator) installObject(target string, targetObject interface{}
 		}
 		// install it, but keeps the original data
 		return r.install(&r.replicatorProps, &copyMeta, sourceObject, targetObject)
+	}
 	// the data comes directly from the source
-	} else {
-		if targetMeta != nil {
-			// the target was previously replicated from another source
-			// replication is required
-			if _, ok := targetMeta.Annotations[ReplicateFromAnnotation]; ok {
-			// checks that the target needs to be updated
-			} else if ok, err := r.needsDataUpdate(targetMeta, sourceMeta); !ok {
+	if targetMeta != nil {
+		// the target was previously replicated from another source
+		// replication is required
+		if _, ok := targetMeta.Annotations[ReplicateFromAnnotation]; ok {
+		// checks that the target is up to date
+		} else if ok, once, err := r.needsDataUpdate(targetMeta, sourceMeta); !ok {
+			// check that the target needs replication-allowed annoations update
+			if (!once) {
+			} else if ok, err2 := r.needsAllowedAnnotationsUpdate(targetMeta, sourceMeta); err2 != nil {
+				err = err2
+			} else if ok {
+				err = nil
+			}
+			if (err != nil) {
 				log.Printf("replication of %s %s/%s is skipped: %s",
 					r.Name, sourceMeta.Namespace, sourceMeta.Name, err)
 				return err
 			}
+			// copy the target but update replication-allowed annoations
+			copyMeta := targetMeta.DeepCopy()
+			if val, ok := sourceMeta.Annotations[ReplicationAllowed]; ok {
+				copyMeta.Annotations[ReplicationAllowed] = val
+			} else {
+				delete(copyMeta.Annotations, ReplicationAllowed)
+			}
+			if val, ok := sourceMeta.Annotations[ReplicationAllowedNamespaces]; ok {
+				copyMeta.Annotations[ReplicationAllowedNamespaces] = val
+			} else {
+				delete(copyMeta.Annotations, ReplicationAllowedNamespaces)
+			}
+			// install it with the original data
+			return r.install(&r.replicatorProps, copyMeta, sourceObject, targetObject)
 		}
-		// create a new meta with all the annotations
-		copyMeta := metav1.ObjectMeta{
-			Namespace:   targetSplit[0],
-			Name:        targetSplit[1],
-			Annotations: map[string]string{},
-		}
-
-		copyMeta.Annotations[ReplicatedAtAnnotation] = time.Now().Format(time.RFC3339)
-		copyMeta.Annotations[ReplicatedByAnnotation] = fmt.Sprintf("%s/%s",
-			sourceMeta.Namespace, sourceMeta.Name)
-		copyMeta.Annotations[ReplicatedFromVersionAnnotation] = sourceMeta.ResourceVersion
-		if val, ok := sourceMeta.Annotations[ReplicateOnceVersionAnnotation]; ok {
-			copyMeta.Annotations[ReplicateOnceVersionAnnotation] = val
-		}
-		// replicate authorization annotations too
-		if val, ok := sourceMeta.Annotations[ReplicationAllowed]; ok {
-			copyMeta.Annotations[ReplicationAllowed] = val
-		}
-		if val, ok := sourceMeta.Annotations[ReplicationAllowedNamespaces]; ok {
-			copyMeta.Annotations[ReplicationAllowedNamespaces] = val
-		}
-		// Needs ResourceVersion for update
-		if targetMeta != nil {
-			copyMeta.ResourceVersion = targetMeta.ResourceVersion
-		}
-		// install it with the source data
-		return r.install(&r.replicatorProps, &copyMeta, sourceObject, sourceObject)
 	}
+	// create a new meta with all the annotations
+	copyMeta := metav1.ObjectMeta{
+		Namespace:   targetSplit[0],
+		Name:        targetSplit[1],
+		Annotations: map[string]string{},
+	}
+
+	copyMeta.Annotations[ReplicatedAtAnnotation] = time.Now().Format(time.RFC3339)
+	copyMeta.Annotations[ReplicatedByAnnotation] = fmt.Sprintf("%s/%s",
+		sourceMeta.Namespace, sourceMeta.Name)
+	copyMeta.Annotations[ReplicatedFromVersionAnnotation] = sourceMeta.ResourceVersion
+	if val, ok := sourceMeta.Annotations[ReplicateOnceVersionAnnotation]; ok {
+		copyMeta.Annotations[ReplicateOnceVersionAnnotation] = val
+	}
+	// replicate authorization annotations too
+	if val, ok := sourceMeta.Annotations[ReplicationAllowed]; ok {
+		copyMeta.Annotations[ReplicationAllowed] = val
+	}
+	if val, ok := sourceMeta.Annotations[ReplicationAllowedNamespaces]; ok {
+		copyMeta.Annotations[ReplicationAllowedNamespaces] = val
+	}
+	// Needs ResourceVersion for update
+	if targetMeta != nil {
+		copyMeta.ResourceVersion = targetMeta.ResourceVersion
+	}
+	// install it with the source data
+	return r.install(&r.replicatorProps, &copyMeta, sourceObject, sourceObject)
 }
 
 func (r *objectReplicator) objectFromStore(key string) (interface{}, *metav1.ObjectMeta, error) {
