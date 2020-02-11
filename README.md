@@ -184,7 +184,7 @@ metadata:
   name: my-tls
   namespace: jx
   annotations:
-    v1.kubernetes-replicator.olli.com/replication-to-namespaces: "jx-.*"
+    v1.kubernetes-replicator.olli.com/replicate-to-namespaces: "jx-.*"
 stringData:
   tls.crt: |
     -----BEGIN CERTIFICATE-----
