@@ -385,6 +385,8 @@ func (r *objectReplicator) installObject(target string, targetObject interface{}
 		if targetMeta != nil {
 			copyMeta.ResourceVersion = targetMeta.ResourceVersion
 		}
+
+		log.Printf("installing %s %s/%s: updating replicate-from annotations", r.Name, copyMeta.Namespace, copyMeta.Name)
 		// install it, but keeps the original data
 		return r.install(&r.replicatorProps, &copyMeta, sourceObject, targetObject)
 	}
@@ -419,6 +421,8 @@ func (r *objectReplicator) installObject(target string, targetObject interface{}
 			} else {
 				delete(copyMeta.Annotations, ReplicationAllowedNamespaces)
 			}
+
+			log.Printf("installing %s %s/%s: updating replication-allowed annotations", r.Name, copyMeta.Namespace, copyMeta.Name)
 			// install it with the original data
 			return r.install(&r.replicatorProps, copyMeta, sourceObject, targetObject)
 		}
@@ -448,6 +452,8 @@ func (r *objectReplicator) installObject(target string, targetObject interface{}
 	if targetMeta != nil {
 		copyMeta.ResourceVersion = targetMeta.ResourceVersion
 	}
+
+	log.Printf("installing %s %s/%s: updating data", r.Name, copyMeta.Namespace, copyMeta.Name)
 	// install it with the source data
 	return r.install(&r.replicatorProps, &copyMeta, sourceObject, sourceObject)
 }

@@ -197,7 +197,7 @@ func (*configMapActions) install(r *replicatorProps, meta *metav1.ObjectMeta, so
 		}
 	}
 
-	log.Printf("installing config map %s/%s", configMap.Namespace, configMap.Name)
+	// log.Printf("installing config map %s/%s", configMap.Namespace, configMap.Name)
 
 	var s *v1.ConfigMap
 	var err error
