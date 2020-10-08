@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mittwald/kubernetes-replicator/liveness"
-	"github.com/mittwald/kubernetes-replicator/replicate"
+	"github.com/olli-ai/kubernetes-replicator/liveness"
+	"github.com/olli-ai/kubernetes-replicator/replicate"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"

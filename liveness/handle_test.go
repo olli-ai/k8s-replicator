@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/mittwald/kubernetes-replicator/replicate"
+	"github.com/olli-ai/kubernetes-replicator/replicate"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -14,7 +14,7 @@ type MockReplicator struct {
 	synced bool
 }
 
-func (r *MockReplicator) Run() {
+func (r *MockReplicator) Start() {
 }
 
 func (r *MockReplicator) Synced() bool {

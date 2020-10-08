@@ -4,25 +4,32 @@ package replicate
 var (
 	ReplicateFromAnnotation         = "replicate-from"
 	ReplicateToAnnotation           = "replicate-to"
-	ReplicateToNamespacesAnnotation = "replicate-to-namespaces"
+	ReplicateToNsAnnotation         = "replicate-to-namespaces"
 	ReplicateOnceAnnotation         = "replicate-once"
 	ReplicateOnceVersionAnnotation  = "replicate-once-version"
 	ReplicatedAtAnnotation          = "replicated-at"
 	ReplicatedByAnnotation          = "replicated-by"
 	ReplicatedFromVersionAnnotation = "replicated-from-version"
-	ReplicationAllowed              = "replication-allowed"
-	ReplicationAllowedNamespaces    = "replication-allowed-namespaces"
+	ReplicationAllowedAnnotation    = "replication-allowed"
+	ReplicationAllowedNsAnnotation  = "replication-allowed-namespaces"
 )
 
+var annotaions = map[string]*string{
+	ReplicateFromAnnotation:         &ReplicateFromAnnotation,
+	ReplicateToAnnotation:           &ReplicateToAnnotation,
+	ReplicateToNsAnnotation:         &ReplicateToNsAnnotation,
+	ReplicateOnceAnnotation:         &ReplicateOnceAnnotation,
+	ReplicateOnceVersionAnnotation:  &ReplicateOnceVersionAnnotation,
+	ReplicatedAtAnnotation:          &ReplicatedAtAnnotation,
+	ReplicatedByAnnotation:          &ReplicatedByAnnotation,
+	ReplicatedFromVersionAnnotation: &ReplicatedFromVersionAnnotation,
+	ReplicationAllowedAnnotation:    &ReplicationAllowedAnnotation,
+	ReplicationAllowedNsAnnotation:  &ReplicationAllowedNsAnnotation,
+}
+
+// PrefixAnnotations sets the prefix of all the annotations
 func PrefixAnnotations(prefix string){
-	ReplicateFromAnnotation         = prefix + ReplicateFromAnnotation
-	ReplicateToAnnotation           = prefix + ReplicateToAnnotation
-	ReplicateToNamespacesAnnotation = prefix + ReplicateToNamespacesAnnotation
-	ReplicateOnceAnnotation         = prefix + ReplicateOnceAnnotation
-	ReplicateOnceVersionAnnotation  = prefix + ReplicateOnceVersionAnnotation
-	ReplicatedAtAnnotation          = prefix + ReplicatedAtAnnotation
-	ReplicatedByAnnotation          = prefix + ReplicatedByAnnotation
-	ReplicatedFromVersionAnnotation = prefix + ReplicatedFromVersionAnnotation
-	ReplicationAllowed              = prefix + ReplicationAllowed
-	ReplicationAllowedNamespaces    = prefix + ReplicationAllowedNamespaces
+	for suffix, annotation := range annotaions {
+		*annotation = prefix + suffix
+	}
 }

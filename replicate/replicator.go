@@ -12,29 +12,42 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
+// the interface to implement for each resource type
 type replicatorActions interface {
+	// Returns the meta of a resource
+	// Probably nothing more than `&object.(*ResourceType).ObjectMeta`
 	getMeta(object interface{}) *metav1.ObjectMeta
-	update(r *replicatorProps, object interface{}, sourceObject interface{}) error
-	clear(r *replicatorProps, object interface{}) error
+	// Updates a resource with the data from the source, and the given annotations
+	update(r *replicatorProps, object interface{}, sourceObject interface{}, annotations map[string]string) error
+	// Clears a resource from any data, and set the given annotations
+	clear(r *replicatorProps, object interface{}, annotations map[string]string) error
+	// Creates or updates the given resource with info from the source, data from the data object, and the given meta
+	// create if `object.ResourceVersion == ""`, update else
 	install(r *replicatorProps, meta *metav1.ObjectMeta, sourceObject interface{}, dataObject interface{}) error
+	// Deletes the given resource
 	delete(r *replicatorProps, meta interface{}) error
 }
 
+// the structure merging both
 type objectReplicator struct {
 	replicatorProps
 	replicatorActions
 }
 
+// if synched with kubernetes
 func (r *objectReplicator) Synced() bool {
 	return r.namespaceController.HasSynced() && r.objectController.HasSynced()
 }
 
+// starts the replicator
 func (r *objectReplicator) Start() {
 	log.Printf("running %s object controller", r.Name)
 	go r.namespaceController.Run(wait.NeverStop)
 	go r.objectController.Run(wait.NeverStop)
 }
 
+// Called when a namespace is seen in kubernetes
+// Creates the resouces that should be replicated in that namespace
 func (r *objectReplicator) NamespaceAdded(object interface{}) {
 	namespace := object.(*v1.Namespace)
 	log.Printf("new namespace %s", namespace.Name)
@@ -80,6 +93,7 @@ func (r *objectReplicator) NamespaceAdded(object interface{}) {
 	}
 }
 
+// Replicates a source to a namespace, using the replicate-to annotations
 func (r *objectReplicator) replicateToNamespace(object interface{}, namespace string) {
 	meta := r.getMeta(object)
 	key := fmt.Sprintf("%s/%s", meta.Namespace, meta.Name)
@@ -129,6 +143,8 @@ func (r *objectReplicator) replicateToNamespace(object interface{}, namespace st
 	// because if we are here, it means they already match this namespace
 }
 
+// Called when a new resource is seen in kubernetes
+// Checks its replication status and does the necessaey updates
 func (r *objectReplicator) ObjectAdded(object interface{}) {
 	meta := r.getMeta(object)
 	key := fmt.Sprintf("%s/%s", meta.Namespace, meta.Name)
@@ -303,6 +319,7 @@ Targets:
 	}
 }
 
+// Replicates a resource that has a replicate-from annotation from its source
 func (r *objectReplicator) replicateObject(object interface{}, sourceObject  interface{}) error {
 	meta := r.getMeta(object)
 	sourceMeta := r.getMeta(sourceObject)
@@ -316,10 +333,24 @@ func (r *objectReplicator) replicateObject(object interface{}, sourceObject  int
 		log.Printf("replication of %s %s/%s is skipped: %s", r.Name, meta.Namespace, meta.Name, err)
 		return err
 	}
+	// build the annotations
+	annotations := map[string]string{}
+	for key, val := range meta.Annotations {
+		annotations[key] = val
+	}
+	annotations[ReplicatedAtAnnotation] = time.Now().Format(time.RFC3339)
+	annotations[ReplicatedFromVersionAnnotation] = sourceMeta.ResourceVersion
+	if val, ok := sourceMeta.Annotations[ReplicateOnceVersionAnnotation]; ok {
+		annotations[ReplicateOnceVersionAnnotation] = val
+	} else {
+		delete(annotations, ReplicateOnceVersionAnnotation)
+	}
 	// replicate it
-	return r.update(&r.replicatorProps, object, sourceObject)
+	return r.update(&r.replicatorProps, object, sourceObject, annotations)
 }
 
+// Repliates a resource that has a replicate-to annotation to its target
+// Pass either target string or targetObject object
 func (r *objectReplicator) installObject(target string, targetObject interface{}, sourceObject interface{}) error {
 	var targetMeta *metav1.ObjectMeta
 	sourceMeta := r.getMeta(sourceObject)
@@ -397,7 +428,7 @@ func (r *objectReplicator) installObject(target string, targetObject interface{}
 		if _, ok := targetMeta.Annotations[ReplicateFromAnnotation]; ok {
 		// checks that the target is up to date
 		} else if ok, once, err := r.needsDataUpdate(targetMeta, sourceMeta); !ok {
-			// check that the target needs replication-allowed annoations update
+			// check that the target needs replication-allowed annotations update
 			if (!once) {
 			} else if ok, err2 := r.needsAllowedAnnotationsUpdate(targetMeta, sourceMeta); err2 != nil {
 				err = err2
@@ -409,17 +440,17 @@ func (r *objectReplicator) installObject(target string, targetObject interface{}
 					r.Name, sourceMeta.Namespace, sourceMeta.Name, err)
 				return err
 			}
-			// copy the target but update replication-allowed annoations
+			// copy the target but update replication-allowed annotations
 			copyMeta := targetMeta.DeepCopy()
-			if val, ok := sourceMeta.Annotations[ReplicationAllowed]; ok {
-				copyMeta.Annotations[ReplicationAllowed] = val
+			if val, ok := sourceMeta.Annotations[ReplicationAllowedAnnotation]; ok {
+				copyMeta.Annotations[ReplicationAllowedAnnotation] = val
 			} else {
-				delete(copyMeta.Annotations, ReplicationAllowed)
+				delete(copyMeta.Annotations, ReplicationAllowedAnnotation)
 			}
-			if val, ok := sourceMeta.Annotations[ReplicationAllowedNamespaces]; ok {
-				copyMeta.Annotations[ReplicationAllowedNamespaces] = val
+			if val, ok := sourceMeta.Annotations[ReplicationAllowedNsAnnotation]; ok {
+				copyMeta.Annotations[ReplicationAllowedNsAnnotation] = val
 			} else {
-				delete(copyMeta.Annotations, ReplicationAllowedNamespaces)
+				delete(copyMeta.Annotations, ReplicationAllowedNsAnnotation)
 			}
 
 			log.Printf("installing %s %s/%s: updating replication-allowed annotations", r.Name, copyMeta.Namespace, copyMeta.Name)
@@ -442,11 +473,11 @@ func (r *objectReplicator) installObject(target string, targetObject interface{}
 		copyMeta.Annotations[ReplicateOnceVersionAnnotation] = val
 	}
 	// replicate authorization annotations too
-	if val, ok := sourceMeta.Annotations[ReplicationAllowed]; ok {
-		copyMeta.Annotations[ReplicationAllowed] = val
+	if val, ok := sourceMeta.Annotations[ReplicationAllowedAnnotation]; ok {
+		copyMeta.Annotations[ReplicationAllowedAnnotation] = val
 	}
-	if val, ok := sourceMeta.Annotations[ReplicationAllowedNamespaces]; ok {
-		copyMeta.Annotations[ReplicationAllowedNamespaces] = val
+	if val, ok := sourceMeta.Annotations[ReplicationAllowedNsAnnotation]; ok {
+		copyMeta.Annotations[ReplicationAllowedNsAnnotation] = val
 	}
 	// Needs ResourceVersion for update
 	if targetMeta != nil {
@@ -458,6 +489,11 @@ func (r *objectReplicator) installObject(target string, targetObject interface{}
 	return r.install(&r.replicatorProps, &copyMeta, sourceObject, sourceObject)
 }
 
+// Gets a resource from the object store
+// Returns:
+//	- object: the resource, if present in the object store
+//  - meta: the resource's meta, if present in the object store
+//  - err: an error if not present
 func (r *objectReplicator) objectFromStore(key string) (interface{}, *metav1.ObjectMeta, error) {
 	if object, exists, err := r.objectStore.GetByKey(key); err != nil {
 		return nil, nil, fmt.Errorf("could not get %s %s: %s", r.Name, key, err)
@@ -468,6 +504,7 @@ func (r *objectReplicator) objectFromStore(key string) (interface{}, *metav1.Obj
 	}
 }
 
+// Updates the list of all target resources that should be notified when the source is updated
 func (r *objectReplicator) updateDependents(object interface{}, replicas []string) error {
 	meta := r.getMeta(object)
 	key := fmt.Sprintf("%s/%s", meta.Namespace, meta.Name)
@@ -508,6 +545,8 @@ func (r *objectReplicator) updateDependents(object interface{}, replicas []strin
 	return nil
 }
 
+// Called when a resource is updated
+// Checks if a target should be cleared / deleted, or if it should be replaced by a replication
 func (r *objectReplicator) ObjectDeleted(object interface{}) {
 	meta := r.getMeta(object)
 	key := fmt.Sprintf("%s/%s", meta.Namespace, meta.Name)
@@ -589,6 +628,7 @@ func (r *objectReplicator) ObjectDeleted(object interface{}) {
 	}
 }
 
+// Clear a resource's data, because its source has been deleted or doesn't allow replication anymore
 func (r *objectReplicator) clearObject(key string, sourceObject interface{}) (bool, error) {
 	sourceMeta := r.getMeta(sourceObject)
 
@@ -613,10 +653,19 @@ func (r *objectReplicator) doClearObject(object interface{}) error {
 		log.Printf("%s %s/%s is already up-to-date", r.Name, meta.Namespace, meta.Name)
 		return nil
 	}
+	// build the annotations
+	annotations := map[string]string{}
+	for key, val := range meta.Annotations {
+		annotations[key] = val
+	}
+	annotations[ReplicatedAtAnnotation] = time.Now().Format(time.RFC3339)
+	delete(annotations, ReplicatedFromVersionAnnotation)
+	delete(annotations, ReplicateOnceVersionAnnotation)
 
-	return r.clear(&r.replicatorProps, object)
+	return r.clear(&r.replicatorProps, object, annotations)
 }
 
+// Deletes a resource, because its source was deleted or stopped replication
 func (r *objectReplicator) deleteObject(key string, sourceObject interface{}) (bool, error) {
 	sourceMeta := r.getMeta(sourceObject)
 
@@ -630,10 +679,9 @@ func (r *objectReplicator) deleteObject(key string, sourceObject interface{}) (b
 	if ok, err := r.isReplicatedBy(meta, sourceMeta); !ok {
 		log.Printf("deletion of %s %s is cancelled: %s", r.Name, key, err)
 		return false, err
-	// delete the object
-	} else {
-		return true, r.doDeleteObject(object)
 	}
+	// delete the object
+	return true, r.doDeleteObject(object)
 }
 
 func (r *objectReplicator) doDeleteObject(object interface{}) error {

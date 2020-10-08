@@ -12,7 +12,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-var SecretActions *secretActions = &secretActions{}
+var replicatorActions *secretActions = &secretActions{}
 
 // NewSecretReplicator creates a new secret replicator
 func NewSecretReplicator(client kubernetes.Interface, resyncPeriod time.Duration, allowAll bool) Replicator {
@@ -28,9 +28,9 @@ func NewSecretReplicator(client kubernetes.Interface, resyncPeriod time.Duration
 			watchedTargets:  make(map[string][]string),
 			watchedPatterns: make(map[string][]targetPattern),
 		},
-		replicatorActions: SecretActions,
+		replicatorActions: replicatorActions,
 	}
-
+	// init the namespace informer
 	namespaceStore, namespaceController := cache.NewInformer(
 		&cache.ListWatch{
 			ListFunc: func(lo metav1.ListOptions) (runtime.Object, error) {
@@ -61,7 +61,7 @@ func NewSecretReplicator(client kubernetes.Interface, resyncPeriod time.Duration
 
 	repl.namespaceStore = namespaceStore
 	repl.namespaceController = namespaceController
-
+	// init the object informer
 	objectStore, objectController := cache.NewInformer(
 		&cache.ListWatch{
 			ListFunc: func(lo metav1.ListOptions) (runtime.Object, error) {
@@ -102,10 +102,13 @@ func (*secretActions) getMeta(object interface{}) *metav1.ObjectMeta {
 	return &object.(*v1.Secret).ObjectMeta
 }
 
-func (*secretActions) update(r *replicatorProps, object interface{}, sourceObject interface{}) error {
+func (*secretActions) update(r *replicatorProps, object interface{}, sourceObject interface{}, annotations map[string]string) error {
 	sourceSecret := sourceObject.(*v1.Secret)
+	// copy the secret
 	secret := object.(*v1.Secret).DeepCopy()
-
+	// set the annotations
+	secret.Annotations = annotations
+	// copy the data
 	if sourceSecret.Data != nil {
 		secret.Data = make(map[string][]byte)
 		for key, value := range sourceSecret.Data {
@@ -118,47 +121,40 @@ func (*secretActions) update(r *replicatorProps, object interface{}, sourceObjec
 	}
 
 	log.Printf("updating secret %s/%s", secret.Namespace, secret.Name)
-
-	secret.Annotations[ReplicatedAtAnnotation] = time.Now().Format(time.RFC3339)
-	secret.Annotations[ReplicatedFromVersionAnnotation] = sourceSecret.ResourceVersion
-	if val, ok := sourceSecret.Annotations[ReplicateOnceVersionAnnotation]; ok {
-		secret.Annotations[ReplicateOnceVersionAnnotation] = val
-	} else {
-		delete(secret.Annotations, ReplicateOnceVersionAnnotation)
-	}
-
+	// update the secret
 	s, err := r.client.CoreV1().Secrets(secret.Namespace).Update(secret)
 	if err != nil {
 		log.Printf("error while updating secret %s/%s: %s", secret.Namespace, secret.Name, err)
 		return err
 	}
-
+	// update the object store in advance, to avoid being disturbed later
 	r.objectStore.Update(s)
 	return nil
 }
 
-func (*secretActions) clear(r *replicatorProps, object interface{}) error {
+func (*secretActions) clear(r *replicatorProps, object interface{}, annotations map[string]string) error {
+	// copy the secret
 	secret := object.(*v1.Secret).DeepCopy()
+	// set the annotations
+	secret.Annotations = annotations
+	// clear the data
 	secret.Data = nil
 
 	log.Printf("clearing secret %s/%s", secret.Namespace, secret.Name)
-
-	secret.Annotations[ReplicatedAtAnnotation] = time.Now().Format(time.RFC3339)
-	delete(secret.Annotations, ReplicatedFromVersionAnnotation)
-	delete(secret.Annotations, ReplicateOnceVersionAnnotation)
-
+	// update the secret
 	s, err := r.client.CoreV1().Secrets(secret.Namespace).Update(secret)
 	if err != nil {
 		log.Printf("error while clearing secret %s/%s", secret.Namespace, secret.Name)
 		return err
 	}
-
+	// update the object store in advance, to avoid being disturbed later
 	r.objectStore.Update(s)
 	return nil
 }
 
 func (*secretActions) install(r *replicatorProps, meta *metav1.ObjectMeta, sourceObject interface{}, dataObject interface{}) error {
 	sourceSecret := sourceObject.(*v1.Secret)
+	// create a new secret
 	secret := v1.Secret{
 		Type: sourceSecret.Type,
 		TypeMeta: metav1.TypeMeta{
@@ -167,10 +163,10 @@ func (*secretActions) install(r *replicatorProps, meta *metav1.ObjectMeta, sourc
 		},
 		ObjectMeta: *meta,
 	}
-
+	// if there is data
 	if dataObject != nil {
 		dataSecret := dataObject.(*v1.Secret)
-
+		// copy the data
 		if dataSecret.Data != nil {
 			secret.Data = make(map[string][]byte)
 			for key, value := range dataSecret.Data {
@@ -186,8 +182,10 @@ func (*secretActions) install(r *replicatorProps, meta *metav1.ObjectMeta, sourc
 	var s *v1.Secret
 	var err error
 	if secret.ResourceVersion == "" {
+		// create the secret
 		s, err = r.client.CoreV1().Secrets(secret.Namespace).Create(&secret)
 	} else {
+		// update the secret
 		s, err = r.client.CoreV1().Secrets(secret.Namespace).Update(&secret)
 	}
 
@@ -195,7 +193,7 @@ func (*secretActions) install(r *replicatorProps, meta *metav1.ObjectMeta, sourc
 		log.Printf("error while installing secret %s/%s: %s", secret.Namespace, secret.Name, err)
 		return err
 	}
-
+	// update the object store in advance, to avoid being disturbed later
 	r.objectStore.Update(s)
 	return nil
 }
@@ -203,19 +201,19 @@ func (*secretActions) install(r *replicatorProps, meta *metav1.ObjectMeta, sourc
 func (*secretActions) delete(r *replicatorProps, object interface{}) error {
 	secret := object.(*v1.Secret)
 	log.Printf("deleting secret %s/%s", secret.Namespace, secret.Name)
-
+	// prepare the delete options
 	options := metav1.DeleteOptions{
 		Preconditions: &metav1.Preconditions{
 			ResourceVersion: &secret.ResourceVersion,
 		},
 	}
-
+	// delete the secret
 	err := r.client.CoreV1().Secrets(secret.Namespace).Delete(secret.Name, &options)
 	if err != nil {
 		log.Printf("error while deleting secret %s/%s: %s", secret.Namespace, secret.Name, err)
 		return err
 	}
-
+	// update the object store in advance, to avoid being disturbed later
 	r.objectStore.Delete(secret)
 	return nil
 }

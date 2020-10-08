@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/mittwald/kubernetes-replicator/replicate"
+	"github.com/olli-ai/kubernetes-replicator/replicate"
 )
 
 type response struct {
