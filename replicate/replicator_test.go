@@ -212,10 +212,6 @@ func createReplicator(allowAll bool, namespaces ...string) *objectReplicator {
 	return replicator
 }
 
-func getActions(r *objectReplicator) []*testAction {
-	return r.replicatorActions.(*testActions).Actions
-}
-
 func addNamespace(r *objectReplicator, namespace string) *v1.Namespace {
 	object := &v1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -285,6 +281,29 @@ func deleteObject(r *objectReplicator, namespace string, name string) *testObjec
 	return object
 }
 
+func assertAction(t *testing.T, r *objectReplicator, index int, action *testAction) {
+	actions := r.replicatorActions.(*testActions).Actions
+	prefix := fmt.Sprintf("[%d].", index)
+	if len(actions) > index &&
+			assert.Equal(t, action.Action, actions[index].Action, prefix + "Action") &&
+			assert.Equal(t, action.Object.Meta.Namespace, actions[index].Object.Meta.Namespace, prefix + "Object.Meta.Namespace") &&
+			assert.Equal(t, action.Object.Meta.Name, actions[index].Object.Meta.Name, prefix + "Object.Meta.Name") {
+		assert.Equal(t, action.Conflict, actions[index].Conflict, prefix + "Conflict")
+		assert.Equal(t, action.Object.Type, actions[index].Object.Type, prefix + "Object.Type")
+		assert.Equal(t, action.Object.Data, actions[index].Object.Data, prefix + "Object.Data")
+		assert.Equal(t, action.Object.Meta.ResourceVersion, actions[index].Object.Meta.ResourceVersion, prefix + "Object.Meta.ResourceVersion")
+		testAnnotations := actions[index].Object.Meta.Annotations
+		for k, v := range(action.Object.Meta.Annotations) {
+			assert.Equal(t, v, testAnnotations[k], fmt.Sprintf("[%v]Object.Meta.Annotations[\"%v\"]", index, k))
+		}
+	}
+}
+
+func requireActionsLength(t *testing.T, r *objectReplicator, length int) {
+	actions := r.replicatorActions.(*testActions).Actions
+	require.Equal(t, length, len(actions), "len(actions)")
+}
+
 type M = map[string]string
 
 func TestReplicateFrom_normal(t *testing.T) {
@@ -293,40 +312,50 @@ func TestReplicateFrom_normal(t *testing.T) {
 		ReplicationAllowedAnnotation: "true",
 	})
 	r.ObjectAdded(source)
-	require.Equal(t, 0, len(getActions(r)), "len(actions)")
+	requireActionsLength(t, r, 0)
 	target := updateObject(r, "target-ns", "target", M{
 		ReplicateFromAnnotation: "source-ns/source",
 	})
+
 	r.ObjectAdded(target)
+	assertAction(t, r, 0, &testAction{
+		Action: "update",
+		Conflict: false,
+		Object: testObject{
+			Type: "1",
+			Data: "0",
+			Meta: metav1.ObjectMeta{
+				Name: "target",
+				Namespace: "target-ns",
+				ResourceVersion: "1",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "0",
+				},
+			},
+		},
+	})
+	requireActionsLength(t, r, 1)
 
-	actions := getActions(r)
-	if len(actions) > 0 &&
-			assert.Equal(t, "update", actions[0].Action, "[0].Action") &&
-			assert.Equal(t, "target-ns", actions[0].Object.Meta.Namespace, "[0].Object.Meta.Namespace") &&
-			assert.Equal(t, "target", actions[0].Object.Meta.Name, "[0].Object.Meta.Name") {
-		assert.False(t, actions[0].Conflict, "[0].Conflict")
-		assert.Equal(t, "1", actions[0].Object.Type, "[0].Object.Type")
-		assert.Equal(t, "0", actions[0].Object.Data, "[0].Object.Data")
-		assert.Equal(t, "1", actions[0].Object.Meta.ResourceVersion, "[0].Object.Meta.ResourceVersion")
-		assert.Equal(t, "0", actions[0].Object.Meta.Annotations[ReplicatedFromVersionAnnotation], "[0].Object.Meta.Annotations[ReplicatedFromVersionAnnotation]")
-	}
-
-	require.Equal(t, 1, len(getActions(r)), "len(actions)")
 	r.ObjectAdded(getObject(r, "target-ns", "target"))
-	require.Equal(t, 1, len(getActions(r)), "len(actions)")
+	requireActionsLength(t, r, 1)
 	source = updateObject(r, "source-ns", "source", nil)
-	r.ObjectAdded(source)
 
-	actions = getActions(r)
-	if len(actions) > 1 &&
-			assert.Equal(t, "update", actions[1].Action, "[1].Action") &&
-			assert.Equal(t, "target-ns", actions[1].Object.Meta.Namespace, "[1].Object.Meta.Namespace") &&
-			assert.Equal(t, "target", actions[1].Object.Meta.Name, "[1].Object.Meta.Name") {
-		assert.False(t, actions[1].Conflict, "[1].Conflict")
-		assert.Equal(t, "1", actions[1].Object.Type, "[1].Object.Type")
-		assert.Equal(t, "3", actions[1].Object.Data, "[1].Object.Data")
-		assert.Equal(t, "2", actions[1].Object.Meta.ResourceVersion, "[1].Object.Meta.ResourceVersion")
-		assert.Equal(t, "3", actions[1].Object.Meta.Annotations[ReplicatedFromVersionAnnotation], "[1].Object.Meta.Annotations[ReplicatedFromVersionAnnotation]")
-	}
-	require.Equal(t, 2, len(actions), "len(actions)")
+	r.ObjectAdded(source)
+	assertAction(t, r, 1, &testAction{
+		Action: "update",
+		Conflict: false,
+		Object: testObject{
+			Type: "1",
+			Data: "3",
+			Meta: metav1.ObjectMeta{
+				Name: "target",
+				Namespace: "target-ns",
+				ResourceVersion: "2",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "3",
+				},
+			},
+		},
+	})
+	requireActionsLength(t, r, 2)
 }
