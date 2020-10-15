@@ -12,7 +12,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-var replicatorActions *secretActions = &secretActions{}
+var _secretActions *secretActions = &secretActions{}
 
 // NewSecretReplicator creates a new secret replicator
 func NewSecretReplicator(client kubernetes.Interface, resyncPeriod time.Duration, allowAll bool) Replicator {
@@ -28,7 +28,7 @@ func NewSecretReplicator(client kubernetes.Interface, resyncPeriod time.Duration
 			watchedTargets:  make(map[string][]string),
 			watchedPatterns: make(map[string][]targetPattern),
 		},
-		replicatorActions: replicatorActions,
+		replicatorActions: _secretActions,
 	}
 	// init the namespace informer
 	namespaceStore, namespaceController := cache.NewInformer(

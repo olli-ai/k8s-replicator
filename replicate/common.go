@@ -402,7 +402,6 @@ func (r *replicatorProps) getReplicationTargets(object *metav1.ObjectMeta) ([]st
 	}
 	// which qualified paths have already been seen (exclude the object itself)
 	seen := map[string]bool{key: true}
-	fmt.Printf("seen %v\n", seen)
 	var names, namespaces, qualified map[string]bool
 	// no target explecitely provided, assumed that targets will have the same name
 	if !okTo {
@@ -448,7 +447,6 @@ func (r *replicatorProps) getReplicationTargets(object *metav1.ObjectMeta) ([]st
 			ns = ns + "/"
 			for n := range names {
 				full := ns + n
-				fmt.Printf("seen %v %v\n", seen[full], full)
 				if !seen[full] {
 					seen[full] = true
 					targets = append(targets, full)
@@ -460,7 +458,6 @@ func (r *replicatorProps) getReplicationTargets(object *metav1.ObjectMeta) ([]st
 			ns = ns + "/"
 			for n := range names {
 				full := ns + n
-				fmt.Printf("seen %v %v\n", seen[full], full)
 				if !seen[full] {
 					seen[full] = true
 					targetPatterns = append(targetPatterns, targetPattern{pattern, n})
@@ -474,7 +471,6 @@ func (r *replicatorProps) getReplicationTargets(object *metav1.ObjectMeta) ([]st
 	}
 	// for all the qualified names, check if the namespace part is a pattern
 	for q := range qualified {
-		fmt.Printf("seen %v %v\n", seen[q], q)
 		if seen[q] {
 		// check that there is exactly one "/"
 		} else if qs := strings.SplitN(q, "/", 3); len(qs) != 2 {

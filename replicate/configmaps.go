@@ -12,7 +12,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-var replicatorActions *configMapActions = &configMapActions{}
+var _configMapActions *configMapActions = &configMapActions{}
 
 // NewConfigMapReplicator creates a new config map replicator
 func NewConfigMapReplicator(client kubernetes.Interface, resyncPeriod time.Duration, allowAll bool) Replicator {
@@ -28,7 +28,7 @@ func NewConfigMapReplicator(client kubernetes.Interface, resyncPeriod time.Durat
 			watchedTargets:  make(map[string][]string),
 			watchedPatterns: make(map[string][]targetPattern),
 		},
-		replicatorActions: replicatorActions,
+		replicatorActions: _configMapActions,
 	}
 	// init the namespace informer
 	namespaceStore, namespaceController := cache.NewInformer(
