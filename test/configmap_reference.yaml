@@ -1,6 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config-target
-  annotations:
-    replicator.v1.mittwald.de/replicate-from: default/config-source
