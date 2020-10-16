@@ -8,6 +8,7 @@ DOCKER_REPOSITORY ?= asia.gcr.io/olli-iviet
 REPOSITORY = ${DOCKER_REPOSITORY}/${DOCKER_IMAGE}:${DOCKER_TAG}
 
 GOCMD = go
+GOLINTCMD = golint
 GOFLAGS ?= $(GOFLAGS:)
 LDFLAGS =
 RUN ?= "."
@@ -25,6 +26,9 @@ builder-image:
 
 test:
 	"$(GOCMD)" test -timeout 1800s -v ./... -run "${RUN}"
+
+lint:
+	"$(GOLINTCMD)" ./...
 
 clean-images:
 	@docker rmi "${DOCKER_REPOSITORY}"

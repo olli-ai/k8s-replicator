@@ -110,29 +110,34 @@ func Test_isReplicationAllowed(t *testing.T) {
 		annotations map[string]string
 		namespace   string
 		allowed     bool
+		disallowed  bool
 	}{{
 		"nothing",
 		false,
 		M{},
 		"target-ns",
 		false,
+		true,
 	}, {
 		"allow all",
 		true,
 		M{},
 		"target-ns",
 		true,
+		false,
 	}, {
 		"explicit disallow",
 		true,
 		M{ReplicationAllowedAnnotation: "false"},
 		"target-ns",
 		false,
+		true,
 	}, {
 		"invalid allow annotation",
 		true,
 		M{ReplicationAllowedAnnotation: "other"},
 		"target-ns",
+		false,
 		false,
 	}, {
 		"explicit disallow namespace",
@@ -140,11 +145,13 @@ func Test_isReplicationAllowed(t *testing.T) {
 		M{ReplicationAllowedNsAnnotation: "other-ns"},
 		"target-ns",
 		false,
+		true,
 	}, {
 		"invalid namespace annotation",
 		true,
 		M{ReplicationAllowedNsAnnotation: "((("},
 		"target-ns",
+		false,
 		false,
 	}, {
 		"explicit allow",
@@ -152,12 +159,14 @@ func Test_isReplicationAllowed(t *testing.T) {
 		M{ReplicationAllowedAnnotation: "true"},
 		"target-ns",
 		true,
+		false,
 	}, {
 		"explicit allow namespace",
 		false,
 		M{ReplicationAllowedNsAnnotation: "target-ns"},
 		"target-ns",
 		true,
+		false,
 	}, {
 		"explicit allow and allow namespace",
 		false,
@@ -167,6 +176,7 @@ func Test_isReplicationAllowed(t *testing.T) {
 		},
 		"target-ns",
 		true,
+		false,
 	}, {
 		"allow but not namespace",
 		false,
@@ -176,54 +186,63 @@ func Test_isReplicationAllowed(t *testing.T) {
 		},
 		"target-ns",
 		false,
+		true,
 	}, {
 		"allow namespace pattern",
 		false,
 		M{ReplicationAllowedNsAnnotation: "number-[0-9]+"},
 		"number-123",
 		true,
+		false,
 	}, {
 		"disallow namespace pattern",
 		false,
 		M{ReplicationAllowedNsAnnotation: "number-[0-9]+"},
 		"number-abc",
 		false,
+		true,
 	}, {
 		"allow namespace list",
 		false,
 		M{ReplicationAllowedNsAnnotation: "abc,def,ghi"},
 		"def",
 		true,
+		false,
 	}, {
 		"disallow namespace list",
 		false,
 		M{ReplicationAllowedNsAnnotation: "abc,def,ghi"},
 		"xyz",
 		false,
+		true,
 	}, {
 		"allow pattern list",
 		false,
 		M{ReplicationAllowedNsAnnotation: "abc-[0-9]+,def-[0-9]+,ghi-[0-9]+"},
 		"def-123",
 		true,
+		false,
 	}, {
 		"disallow pattern list",
 		false,
 		M{ReplicationAllowedNsAnnotation: "abc-[0-9]+,def-[0-9]+,ghi-[0-9]+"},
 		"def-abc",
 		false,
+		true,
 	}, {
 		"allow mix 1",
 		false,
 		M{ReplicationAllowedNsAnnotation: "number-other,number-[0-9]+"},
 		"number-other",
 		true,
+		false,
 	}, {
 		"allow mix 2",
 		false,
 		M{ReplicationAllowedNsAnnotation: "number-other,number-[0-9]+"},
 		"number-123",
 		true,
+		false,
 	}}
 	for _, example := range(examples) {
 		props := &replicatorProps{
@@ -239,8 +258,9 @@ func Test_isReplicationAllowed(t *testing.T) {
 			Namespace:   "source-ns",
 			Annotations: example.annotations,
 		}
-		ok, err := props.isReplicationAllowed(target, source)
+		ok, nok, err := props.isReplicationAllowed(target, source)
 		assert.Equal(t, example.allowed, ok, example.name)
+		assert.Equal(t, example.disallowed, nok, example.name)
 		if example.allowed {
 			assert.NoError(t, err, example.name)
 		} else {

@@ -324,7 +324,11 @@ func (r *objectReplicator) replicateObject(object interface{}, sourceObject  int
 	meta := r.getMeta(object)
 	sourceMeta := r.getMeta(sourceObject)
 	// make sure replication is allowed
-	if ok, err := r.isReplicationAllowed(meta, sourceMeta); !ok {
+	if ok, nok, err := r.isReplicationAllowed(meta, sourceMeta); ok {
+	} else if nok {
+		log.Printf("replication of %s %s/%s is not allowed: %s", r.Name, meta.Namespace, meta.Name, err)
+		return r.doClearObject(object)
+	} else {
 		log.Printf("replication of %s %s/%s is cancelled: %s", r.Name, meta.Namespace, meta.Name, err)
 		return err
 	}
