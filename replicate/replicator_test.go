@@ -176,7 +176,7 @@ func namespaceKey(object interface{}) (string, error) {
 	return object.(*v1.Namespace).Name, nil
 }
 
-func createReplicator(t *testing.T, allowAll bool, namespaces ...string) *objectReplicator {
+func createTestReplicator(t *testing.T, allowAll bool, namespaces ...string) *objectReplicator {
 	replicator := &objectReplicator{
 		replicatorProps: replicatorProps{
 			Name:            "test",
@@ -291,10 +291,8 @@ func requireActionsLength(t *testing.T, r *objectReplicator, length int) {
 	require.Equal(t, length, len(actions), "len(actions)")
 }
 
-type M = map[string]string
-
 func TestReplicateFrom_simple(t *testing.T) {
-	r := createReplicator(t, false)
+	r := createTestReplicator(t, false)
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicationAllowedAnnotation: "true",
 	})
@@ -386,7 +384,7 @@ func TestReplicateFrom_simple(t *testing.T) {
 }
 
 func TestReplicateFrom_allowed(t *testing.T) {
-	r := createReplicator(t, false)
+	r := createTestReplicator(t, false)
 	source := updateObject(r, "source-ns", "source", M{})
 	target := updateObject(r, "target-ns", "target", M{
 		ReplicateFromAnnotation: "source-ns/source",
@@ -484,7 +482,7 @@ func TestReplicateFrom_allowed(t *testing.T) {
 }
 
 func TestReplicateFrom_onceSsource(t *testing.T) {
-	r := createReplicator(t, true)
+	r := createTestReplicator(t, true)
 	target := updateObject(r, "target-ns", "target", M{
 		ReplicateFromAnnotation: "source-ns/source",
 	})
@@ -577,7 +575,7 @@ func TestReplicateFrom_onceSsource(t *testing.T) {
 }
 
 func TestReplicateFrom_onceTtarget(t *testing.T) {
-	r := createReplicator(t, true)
+	r := createTestReplicator(t, true)
 	source := updateObject(r, "source-ns", "source", M{})
 	r.ObjectAdded(source)
 	target := updateObject(r, "target-ns", "target", M{
@@ -640,7 +638,7 @@ func TestReplicateFrom_onceTtarget(t *testing.T) {
 }
 
 func TestReplicateFrom_invalid(t *testing.T) {
-	r := createReplicator(t, false)
+	r := createTestReplicator(t, false)
 	target := updateObject(r, "target-ns", "target", M{
 		ReplicateFromAnnotation: "source-ns/source",
 	})
@@ -703,7 +701,7 @@ func TestReplicateFrom_invalid(t *testing.T) {
 }
 
 func TestReplicateTo_name(t *testing.T) {
-	r := createReplicator(t, false, "my-ns")
+	r := createTestReplicator(t, false, "my-ns")
 	source := updateObject(r, "my-ns", "source", M{
 		ReplicateToAnnotation: "target",
 	})
@@ -802,7 +800,7 @@ func TestReplicateTo_name(t *testing.T) {
 }
 
 func TestReplicateTo_namespaces(t *testing.T) {
-	r := createReplicator(t, false, "target-1", "target-2")
+	r := createTestReplicator(t, false, "target-1", "target-2")
 	source := updateObject(r, "source-ns", "my-test", M{
 		ReplicateToNsAnnotation: "target-[1-3]",
 	})
@@ -1082,7 +1080,7 @@ func TestReplicateTo_namespaces(t *testing.T) {
 }
 
 func TestReplicateTo_once(t *testing.T) {
-	r := createReplicator(t, false, "target-1")
+	r := createTestReplicator(t, false, "target-1")
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-[0-9]+/target",
 		ReplicateOnceAnnotation: "true",
@@ -1220,7 +1218,7 @@ func TestReplicateTo_once(t *testing.T) {
 }
 
 func TestReplicateTo_annotations(t *testing.T) {
-	r := createReplicator(t, false, "target-ns")
+	r := createTestReplicator(t, false, "target-ns")
 
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-ns/target",
@@ -1295,7 +1293,7 @@ func TestReplicateTo_annotations(t *testing.T) {
 }
 
 func TestReplicateTo_invalid(t *testing.T) {
-	r := createReplicator(t, false, "source-ns")
+	r := createTestReplicator(t, false, "source-ns")
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-[0-9]+/target",
 	})
@@ -1363,7 +1361,7 @@ func TestReplicateTo_invalid(t *testing.T) {
 }
 
 func TestReplicateToFrom_scenario(t *testing.T) {
-	r := createReplicator(t, true, "target-ns")
+	r := createTestReplicator(t, true, "target-ns")
 	updateObject(r, "data-ns", "data", M{})
 
 	source := updateObject(r, "source-ns", "source", M{
@@ -1433,7 +1431,7 @@ func TestReplicateToFrom_scenario(t *testing.T) {
 }
 
 func TestReplicateToFrom_annotations(t *testing.T) {
-	r := createReplicator(t, false, "target-ns")
+	r := createTestReplicator(t, false, "target-ns")
 
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-ns/target",
