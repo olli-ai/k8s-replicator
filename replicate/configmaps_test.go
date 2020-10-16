@@ -1,7 +1,6 @@
 package replicate
 
 import (
-	// "fmt"
 	"testing"
 
 	"k8s.io/api/core/v1"
