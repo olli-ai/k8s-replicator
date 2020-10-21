@@ -15,10 +15,4 @@ resources:
     cpu: 100m
     memory: 256Mi
 
-previewNSPrefix: jx-olli-ai-kubernetes-replicator
-
-nodeSelector: {}
-
-tolerations: []
-
-affinity: {}
+prefix: k8s-replicator

@@ -1,16 +1,38 @@
 apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
-  name: replicator
+  name: k8s-replicator
   namespace: kube-system
 spec:
   replicas: 1
   template:
     metadata:
       labels:
-        app: replicator
+        app: k8s-replicator
     spec:
-      serviceAccountName: replicator
+      serviceAccountName: k8s-replicator
       containers:
-        - name: replicator
-          image: asia.gcr.io/olli-iviet/kubernetes-replicator:latest
+      - name: replicator
+        image: asia.gcr.io/olli-iviet/kubernetes-replicator:latest
+        command:
+        - /k8s-replicator
+        - --prefix
+        - k8s-replicator/
+        ports:
+        - name: health
+          containerPort: 9102
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+        resources:
+          limits:
+            cpu: 100m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi

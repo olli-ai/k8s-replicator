@@ -7,10 +7,10 @@ RUN go mod download
 COPY *.go ./
 COPY liveness liveness
 COPY replicate replicate
-RUN go build -o kubernetes-replicator
+RUN go build -o k8s-replicator
 
 FROM golang as production-stage
 LABEL MAINTAINER="Aurelien Lambert <aure@olli-ai.com>"
 
-COPY --from=build-stage /app/kubernetes-replicator /kubernetes-replicator
-ENTRYPOINT  ["/kubernetes-replicator"]
+COPY --from=build-stage /app/k8s-replicator /k8s-replicator
+ENTRYPOINT  ["/k8s-replicator"]

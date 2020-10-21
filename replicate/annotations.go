@@ -29,6 +29,9 @@ var annotaions = map[string]*string{
 
 // PrefixAnnotations sets the prefix of all the annotations
 func PrefixAnnotations(prefix string){
+	if len(prefix) > 0 && prefix[len(prefix)-1] != '/' {
+		prefix = prefix + "/"
+	}
 	for suffix, annotation := range annotaions {
 		*annotation = prefix + suffix
 	}
