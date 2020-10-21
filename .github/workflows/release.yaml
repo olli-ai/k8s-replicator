@@ -42,7 +42,7 @@ jobs:
         run: echo ::set-output name=VERSION::${GITHUB_REF#refs/tags/v}
       - run: bash ./scripts/bump-app-version.sh publish
         env:
-          CHART_PATH: charts/kubernetes-replicator
+          CHART_PATH: deploy/helm-chart/k8s-replicator
           RELEASE_VERSION: ${{ steps.version.outputs.VERSION }}
           RELEASE_USER_TOKEN: ${{ secrets.RELEASE_USER_TOKEN }}
           RELEASE_USER: ${{ secrets.RELEASE_USER }}
