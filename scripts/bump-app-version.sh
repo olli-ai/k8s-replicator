@@ -8,7 +8,7 @@ if [[ -n "${DEBUG}" ]]; then
 fi
 
 ## avoid noisy shellcheck warnings
-CHART_PATH="./chart"
+CHART_PATH="${CHART_PATH:-dummy}"
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-dummy/dummy}"
 RELEASE_VERSION="${RELEASE_VERSION:-0.0.0}"
 RELEASE_USER_TOKEN="${RELEASE_USER_TOKEN:-dummy}"
