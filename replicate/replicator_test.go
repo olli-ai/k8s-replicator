@@ -745,6 +745,8 @@ func TestReplicateTo_name(t *testing.T) {
 		},
 	})
 	requireActionsLength(t, r, 2)
+	r.ObjectAdded(source)
+	requireActionsLength(t, r, 2)
 
 	source = updateObject(r, "my-ns", "source", M{
 		ReplicateToAnnotation: "other",
@@ -878,6 +880,7 @@ func TestReplicateTo_namespaces(t *testing.T) {
 		},
 	})
 	requireActionsLength(t, r, 3)
+	r.NamespaceAdded(addNamespace(r, "target-3"))
 	r.NamespaceAdded(addNamespace(r, "target-4"))
 	requireActionsLength(t, r, 3)
 
@@ -1077,6 +1080,8 @@ func TestReplicateTo_namespaces(t *testing.T) {
 		delete(expected, ns)
 	}
 	requireActionsLength(t, r, 12)
+	r.ObjectDeleted(source)
+	requireActionsLength(t, r, 12)
 }
 
 func TestReplicateTo_once(t *testing.T) {
@@ -1108,6 +1113,8 @@ func TestReplicateTo_once(t *testing.T) {
 		ReplicateToAnnotation: "target-[0-9]+/target",
 		ReplicateOnceAnnotation: "true",
 	})
+	r.ObjectAdded(source)
+	requireActionsLength(t, r, 1)
 	r.ObjectAdded(source)
 	requireActionsLength(t, r, 1)
 
@@ -1215,6 +1222,8 @@ func TestReplicateTo_once(t *testing.T) {
 			},
 		},
 	})
+	r.ObjectDeleted(source)
+	requireActionsLength(t, r, 6)
 }
 
 func TestReplicateTo_annotations(t *testing.T) {
@@ -1267,6 +1276,8 @@ func TestReplicateTo_annotations(t *testing.T) {
 		},
 	})
 	requireActionsLength(t, r, 2)
+	r.ObjectAdded(source)
+	requireActionsLength(t, r, 2)
 
 	source = updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-ns/target",
@@ -1289,6 +1300,74 @@ func TestReplicateTo_annotations(t *testing.T) {
 			},
 		},
 	})
+	requireActionsLength(t, r, 3)
+}
+
+func TestReplicateTo_exsists(t *testing.T) {
+	r := createTestReplicator(t, false, "target-1", "target-2")
+	source := updateObject(r, "source-ns", "source", M{
+		ReplicateToAnnotation: "target-[0-9]+/target",
+	})
+	target1 := updateObject(r, "target-1", "target", M{})
+
+	r.ObjectAdded(source)
+	r.ObjectAdded(source)
+	assertAction(t, r, 0, &testAction{
+		Action: "install",
+		Object: testObject{
+			Type: "0",
+			Data: "0",
+			Meta: metav1.ObjectMeta{
+				Name: "target",
+				Namespace: "target-2",
+				ResourceVersion: "",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "0",
+				},
+			},
+		},
+	})
+	requireActionsLength(t, r, 1)
+
+	target1 = deleteObject(r, "target-1", "target")
+	r.ObjectDeleted(target1)
+	assertAction(t, r, 1, &testAction{
+		Action: "install",
+		Object: testObject{
+			Type: "0",
+			Data: "0",
+			Meta: metav1.ObjectMeta{
+				Name: "target",
+				Namespace: "target-1",
+				ResourceVersion: "",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "0",
+				},
+			},
+		},
+	})
+	requireActionsLength(t, r, 2)
+
+	target2 := deleteObject(r, "target-2", "target")
+	r.ObjectDeleted(target2)
+	assertAction(t, r, 2, &testAction{
+		Action: "install",
+		Object: testObject{
+			Type: "0",
+			Data: "0",
+			Meta: metav1.ObjectMeta{
+				Name: "target",
+				Namespace: "target-2",
+				ResourceVersion: "",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "0",
+				},
+			},
+		},
+	})
+	requireActionsLength(t, r, 3)
+
+	r.ObjectAdded(getObject(r, "target-2", "target"))
 	requireActionsLength(t, r, 3)
 }
 
