@@ -37,7 +37,7 @@ sed -i "s#version:.*#version: ${RELEASE_VERSION}#g" "${CHART_PATH}/Chart.yaml"
 git status
 
 ## Add new remote with credentials baked in url
-git remote add publisher "https://${GITHUB_USER}:${RELEASE_USER_TOKEN}@github.com/${GIT_REPOSITORY}"
+git remote add publisher "https://${GITHUB_USER}:${RELEASE_USER_TOKEN}@github.com/${GITHUB_REPOSITORY}"
 
 ## add and commit changed file
 git add -A

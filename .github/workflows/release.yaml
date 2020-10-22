@@ -23,7 +23,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v1
         with:
-          repository: olliai/k8s-replicator:tagname
+          repository: olliai/k8s-replicator
           tags: latest,${{ steps.version.outputs.VERSION }}
 
   bump-version:
