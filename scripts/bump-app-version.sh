@@ -57,7 +57,7 @@ if [[ "${1}" == "publish" ]]; then
     git push publisher master
 
     ## trigger helm-charts reload
-    curl -X POST 'https://api.github.com/repos/${CHARTS_REPOSITORY}/dispatches' -u "${RELEASE_USER}:${RELEASE_USER_TOKEN}" -d '{"event_type": "updateCharts"}'
+    curl -X POST "https://api.github.com/repos/${CHARTS_REPOSITORY}/dispatches" -u "${RELEASE_USER}:${RELEASE_USER_TOKEN}" -d '{"event_type": "updateCharts"}'
 
 fi
 
