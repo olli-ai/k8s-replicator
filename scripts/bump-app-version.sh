@@ -11,8 +11,8 @@ fi
 CHART_PATH="${CHART_PATH:-dummy}"
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-dummy/dummy}"
 RELEASE_VERSION="${RELEASE_VERSION:-0.0.0}"
+RELEASE_USER="${RELEASE_USER_TOKEN:-dummy}"
 RELEASE_USER_TOKEN="${RELEASE_USER_TOKEN:-dummy}"
-GITHUB_USER="${GITHUB_USER:-dummy}"
 CHARTS_REPOSITORY="${CHARTS_REPOSITORY:-dummy/dummy}"
 
 ## temp working vars
@@ -20,8 +20,8 @@ TIMESTAMP="$(date +%s )"
 TMP_DIR="/tmp/${TIMESTAMP}"
 
 ## set up Git-User
-git config --global user.name "${RELEASE_USER_NAME}"
-git config --global user.email "${RELEASE_USER_EMAIL}"
+git config --global user.name "${RELEASE_USER_NAME:-dummy}"
+git config --global user.email "${RELEASE_USER_EMAIL:-dummy}"
 
 ## temporary clone git repository
 git clone "https://github.com/${GITHUB_REPOSITORY}" "${TMP_DIR}"
@@ -37,7 +37,7 @@ sed -i "s#version:.*#version: ${RELEASE_VERSION}#g" "${CHART_PATH}/Chart.yaml"
 git status
 
 ## Add new remote with credentials baked in url
-git remote add publisher "https://${GITHUB_USER}:${RELEASE_USER_TOKEN}@github.com/${GITHUB_REPOSITORY}"
+git remote add publisher "https://${RELEASE_USER}:${RELEASE_USER_TOKEN}@github.com/${GITHUB_REPOSITORY}"
 
 ## add and commit changed file
 git add -A
