@@ -13,7 +13,7 @@ spec:
       serviceAccountName: k8s-replicator
       containers:
       - name: replicator
-        image: asia.gcr.io/olli-iviet/kubernetes-replicator:latest
+        image: olliai/k8s-replicator:latest
         command:
         - /k8s-replicator
         - --prefix
