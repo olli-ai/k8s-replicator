@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
       - name: replicator
-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        image: "{{ .Values.image.repository }}:{{ default .Chart.Version .Values.image.tag }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         command:
         - /k8s-replicator
