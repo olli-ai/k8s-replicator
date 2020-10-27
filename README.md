@@ -13,8 +13,8 @@ This controller is designed to solve those problems:
 ### From helm repository
 
 ```shellsession
-helm repo add olli-ai https://olli-ai.github.io/helm-charts/
-helm install olli-ai/k8s-replicator --name k8s-replicator
+$ helm repo add olli-ai https://olli-ai.github.io/helm-charts/
+$ helm install olli-ai/k8s-replicator --name k8s-replicator
 ```
 
 ### Using Helm
@@ -242,7 +242,7 @@ admin:
 
 Now a `template/secret-admin.yaml` can be configured
 
-```
+```yaml
 apiVersion: v1
 kind: Secret
 type: Opaque
