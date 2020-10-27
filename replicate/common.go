@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	semver "github.com/Masterminds/semver/v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -196,33 +195,11 @@ func (r *replicatorProps) needsDataUpdate(object *metav1.ObjectMeta, sourceObjec
 	// check the version annotations
 
 	if !hasOnce {
-	// no once version annotation in the source, only replicate once
-	} else if annotationVersion, ok := sourceObject.Annotations[ReplicateOnceVersionAnnotation]; !ok {
-	// source once version annotation is not a valid version
-	} else if sourceVersion, err := semver.NewVersion(annotationVersion); err != nil {
-		return false, false, fmt.Errorf("source %s/%s has illformed annotation %s: %s",
-			sourceObject.Namespace, sourceObject.Name, ReplicateOnceVersionAnnotation, err)
-	// the source has a once version annotation but it is "0.0.0" anyway
-	} else if version0, _ := semver.NewVersion("0"); sourceVersion.Equal(version0) {
-	// no once version annotation in the target, should update
-	} else if annotationVersion, ok := object.Annotations[ReplicateOnceVersionAnnotation]; !ok {
-		hasOnce = false
-	// target once version annotation is not a valid version
-	} else if targetVersion, err := semver.NewVersion(annotationVersion); err != nil {
-		return false, false, fmt.Errorf("target %s/%s has illformed annotation %s: %s",
-			object.Namespace, object.Name, ReplicateOnceVersionAnnotation, err)
-	// source version is greater than target version, should update
-	} else if sourceVersion.GreaterThan(targetVersion) {
-		hasOnce = false
-	// source version is not greater than target version
-	} else {
-		return false, true, fmt.Errorf("target %s/%s is already replicated once at version %s",
-			object.Namespace, object.Name, sourceVersion)
-	}
-
-	// replication is not needed because of the once annotation
-	if hasOnce {
+	} else if sourceVersion, ok := sourceObject.Annotations[ReplicateOnceVersionAnnotation]; !ok {
 		return false, true, fmt.Errorf("target %s/%s is already replicated once",
+			object.Namespace, object.Name)
+	} else if version, ok := object.Annotations[ReplicateOnceVersionAnnotation]; ok && sourceVersion == version {
+		return false, true, fmt.Errorf("target %s/%s is already replicated once at current version",
 			object.Namespace, object.Name)
 	}
 

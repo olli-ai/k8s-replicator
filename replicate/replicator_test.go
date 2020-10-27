@@ -516,13 +516,7 @@ func TestReplicateFrom_onceSsource(t *testing.T) {
 	requireActionsLength(t, r, 1)
 	source = updateObject(r, "source-ns", "source", M{
 		ReplicateOnceAnnotation: "true",
-		ReplicateOnceVersionAnnotation: "0.0.0",
-	})
-	r.ObjectAdded(source)
-	requireActionsLength(t, r, 1)
-	source = updateObject(r, "source-ns", "source", M{
-		ReplicateOnceAnnotation: "true",
-		ReplicateOnceVersionAnnotation: "0.0.1",
+		ReplicateOnceVersionAnnotation: "new",
 	})
 
 	r.ObjectAdded(source)
@@ -530,14 +524,14 @@ func TestReplicateFrom_onceSsource(t *testing.T) {
 		Action: "update",
 		Object: testObject{
 			Type: "0",
-			Data: "5",
+			Data: "4",
 			Meta: metav1.ObjectMeta{
 				Name: "target",
 				Namespace: "target-ns",
 				ResourceVersion: "2",
 				Annotations: M{
-					ReplicatedFromVersionAnnotation: "5",
-					ReplicateOnceVersionAnnotation: "0.0.1",
+					ReplicatedFromVersionAnnotation: "4",
+					ReplicateOnceVersionAnnotation: "new",
 				},
 			},
 		},
@@ -546,12 +540,12 @@ func TestReplicateFrom_onceSsource(t *testing.T) {
 
 	source = updateObject(r, "source-ns", "source", M{
 		ReplicateOnceAnnotation: "true",
-		ReplicateOnceVersionAnnotation: "0.0.1",
+		ReplicateOnceVersionAnnotation: "new",
 	})
 	r.ObjectAdded(source)
 	requireActionsLength(t, r, 2)
 	source = updateObject(r, "source-ns", "source", M{
-		ReplicateOnceVersionAnnotation: "0.0.1",
+		ReplicateOnceVersionAnnotation: "new",
 	})
 
 	r.ObjectAdded(source)
@@ -559,14 +553,14 @@ func TestReplicateFrom_onceSsource(t *testing.T) {
 		Action: "update",
 		Object: testObject{
 			Type: "0",
-			Data: "8",
+			Data: "7",
 			Meta: metav1.ObjectMeta{
 				Name: "target",
 				Namespace: "target-ns",
-				ResourceVersion: "6",
+				ResourceVersion: "5",
 				Annotations: M{
-					ReplicatedFromVersionAnnotation: "8",
-					ReplicateOnceVersionAnnotation: "0.0.1",
+					ReplicatedFromVersionAnnotation: "7",
+					ReplicateOnceVersionAnnotation: "new",
 				},
 			},
 		},
@@ -607,7 +601,7 @@ func TestReplicateFrom_onceTtarget(t *testing.T) {
 	r.ObjectAdded(source)
 	requireActionsLength(t, r, 1)
 	source = updateObject(r, "source-ns", "source", M{
-		ReplicateOnceVersionAnnotation: "1.0.0",
+		ReplicateOnceVersionAnnotation: "",
 	})
 
 	r.ObjectAdded(source)
@@ -623,18 +617,35 @@ func TestReplicateFrom_onceTtarget(t *testing.T) {
 				Annotations: M{
 					ReplicatedFromVersionAnnotation: "4",
 					ReplicateOnceAnnotation: "true",
-					ReplicateOnceVersionAnnotation: "1.0.0",
+					ReplicateOnceVersionAnnotation: "",
 				},
 			},
 		},
 	})
 	requireActionsLength(t, r, 2)
-
 	source = updateObject(r, "source-ns", "source", M{
-		ReplicateOnceVersionAnnotation: "0.9.9",
+		ReplicateOnceVersionAnnotation: "other",
 	})
+
 	r.ObjectAdded(source)
-	requireActionsLength(t, r, 2)
+	assertAction(t, r, 2, &testAction{
+		Action: "update",
+		Object: testObject{
+			Type: "1",
+			Data: "6",
+			Meta: metav1.ObjectMeta{
+				Name: "target",
+				Namespace: "target-ns",
+				ResourceVersion: "5",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "6",
+					ReplicateOnceAnnotation: "true",
+					ReplicateOnceVersionAnnotation: "other",
+				},
+			},
+		},
+	})
+	requireActionsLength(t, r, 3)
 }
 
 func TestReplicateFrom_invalid(t *testing.T) {
@@ -1140,15 +1151,7 @@ func TestReplicateTo_once(t *testing.T) {
 	source = updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-[0-9]+/target",
 		ReplicateOnceAnnotation: "true",
-		ReplicateOnceVersionAnnotation: "0",
-	})
-	r.ObjectAdded(source)
-	requireActionsLength(t, r, 2)
-
-	source = updateObject(r, "source-ns", "source", M{
-		ReplicateToAnnotation: "target-[0-9]+/target",
-		ReplicateOnceAnnotation: "true",
-		ReplicateOnceVersionAnnotation: "0.1",
+		ReplicateOnceVersionAnnotation: "new",
 	})
 	r.ObjectAdded(source)
 
@@ -1162,15 +1165,15 @@ func TestReplicateTo_once(t *testing.T) {
 	assertAction(t, r, index1, &testAction{
 		Action: "install",
 		Object: testObject{
-			Type: "5",
-			Data: "5",
+			Type: "4",
+			Data: "4",
 			Meta: metav1.ObjectMeta{
 				Name: "target",
 				Namespace: "target-1",
 				ResourceVersion: "1",
 				Annotations: M{
-					ReplicatedFromVersionAnnotation: "5",
-					ReplicateOnceVersionAnnotation: "0.1",
+					ReplicatedFromVersionAnnotation: "4",
+					ReplicateOnceVersionAnnotation: "new",
 				},
 			},
 		},
@@ -1178,15 +1181,15 @@ func TestReplicateTo_once(t *testing.T) {
 	assertAction(t, r, index2, &testAction{
 		Action: "install",
 		Object: testObject{
-			Type: "5",
-			Data: "5",
+			Type: "4",
+			Data: "4",
 			Meta: metav1.ObjectMeta{
 				Name: "target",
 				Namespace: "target-2",
 				ResourceVersion: "3",
 				Annotations: M{
-					ReplicatedFromVersionAnnotation: "5",
-					ReplicateOnceVersionAnnotation: "0.1",
+					ReplicatedFromVersionAnnotation: "4",
+					ReplicateOnceVersionAnnotation: "new",
 				},
 			},
 		},
@@ -1208,7 +1211,7 @@ func TestReplicateTo_once(t *testing.T) {
 			Meta: metav1.ObjectMeta{
 				Name: "target",
 				Namespace: "target-1",
-				ResourceVersion: strconv.Itoa(4+index1),
+				ResourceVersion: strconv.Itoa(3+index1),
 			},
 		},
 	})
@@ -1218,7 +1221,7 @@ func TestReplicateTo_once(t *testing.T) {
 			Meta: metav1.ObjectMeta{
 				Name: "target",
 				Namespace: "target-2",
-				ResourceVersion: strconv.Itoa(4+index2),
+				ResourceVersion: strconv.Itoa(3+index2),
 			},
 		},
 	})

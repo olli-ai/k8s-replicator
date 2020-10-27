@@ -339,7 +339,7 @@ func Test_needsDataUpdate(t *testing.T) {
 		false,
 	}, {
 		"replicate once no version",
-		M{ReplicateOnceVersionAnnotation: "0.0.1"},
+		M{ReplicateOnceVersionAnnotation: "new"},
 		M{
 			ReplicateOnceAnnotation: "true",
 			ReplicatedFromVersionAnnotation: "other",
@@ -347,25 +347,15 @@ func Test_needsDataUpdate(t *testing.T) {
 		true,
 		false,
 	}, {
-		"replicate once earlier version",
-		M{ReplicateOnceVersionAnnotation: "1.4.1"},
+		"replicate once version",
+		M{ReplicateOnceVersionAnnotation: "older"},
 		M{
 			ReplicateOnceAnnotation: "true",
 			ReplicatedFromVersionAnnotation: "other",
-			ReplicateOnceVersionAnnotation: "1.3.5",
+			ReplicateOnceVersionAnnotation: "later",
 		},
 		true,
 		false,
-	}, {
-		"replicate once later version",
-		M{ReplicateOnceVersionAnnotation: "1.3.5"},
-		M{
-			ReplicateOnceAnnotation: "true",
-			ReplicatedFromVersionAnnotation: "other",
-			ReplicateOnceVersionAnnotation: "1.4.1",
-		},
-		false,
-		true,
 	}}
 	props := &replicatorProps{
 		Name: "test",
