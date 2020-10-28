@@ -1,6 +1,13 @@
 package replicate
 
+import (
+	"strings"
+)
+
 // Annotations that are used to control this controller's behaviour
+
+var annotationsPrefix = ""
+
 var (
 	ReplicateFromAnnotation         = "replicate-from"
 	ReplicateToAnnotation           = "replicate-to"
@@ -14,7 +21,7 @@ var (
 	ReplicationAllowedNsAnnotation  = "replication-allowed-namespaces"
 )
 
-var annotaions = map[string]*string{
+var annotationRefs = map[string]*string{
 	ReplicateFromAnnotation:         &ReplicateFromAnnotation,
 	ReplicateToAnnotation:           &ReplicateToAnnotation,
 	ReplicateToNsAnnotation:         &ReplicateToNsAnnotation,
@@ -32,7 +39,21 @@ func PrefixAnnotations(prefix string){
 	if len(prefix) > 0 && prefix[len(prefix)-1] != '/' {
 		prefix = prefix + "/"
 	}
-	for suffix, annotation := range annotaions {
+	annotationsPrefix = prefix
+	for suffix, annotation := range annotationRefs {
 		*annotation = prefix + suffix
 	}
+}
+
+func UnknownAnnotations(annotations map[string]string) []string {
+	var unknown []string = nil
+	if annotationsPrefix != "" {
+		for key := range annotations {
+			if annotation := strings.TrimPrefix(key, annotationsPrefix); annotation == key {
+			} else if _, ok := annotationRefs[annotation]; !ok {
+				unknown = append(unknown, key)
+			}
+		}
+	}
+	return unknown
 }

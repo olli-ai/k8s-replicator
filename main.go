@@ -22,6 +22,7 @@ func init() {
 	flag.StringVar(&f.ResyncPeriodS, "resync-period", "30m", "resynchronization period")
 	flag.StringVar(&f.StatusAddr, "status-addr", ":9102", "listen address for status and monitoring server")
 	flag.BoolVar(&f.AllowAll, "allow-all", false, "allow replication of all secrets by default (CAUTION: only use when you know what you're doing)")
+	flag.BoolVar(&f.IgnoreUnknown, "ignore-unknown", true, "unkown annotations with the same prefix do not raise an error")
 	flag.Parse()
 
 	replicate.PrefixAnnotations(f.AnnotationsPrefix)
@@ -30,6 +31,13 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+type newReplicatorFunc func(kubernetes.Interface, replicate.ReplicatorOptions, time.Duration) replicate.Replicator
+
+var newReplicatorFuncs []newReplicatorFunc = []newReplicatorFunc{
+	replicate.NewConfigMapReplicator,
+	replicate.NewSecretReplicator,
 }
 
 func main() {
@@ -50,18 +58,23 @@ func main() {
 	}
 
 	client = kubernetes.NewForConfigOrDie(config)
+	options := replicate.ReplicatorOptions{
+		AllowAll:      f.AllowAll,
+		IgnoreUnknown: f.IgnoreUnknown,
+	}
 
-	secretRepl := replicate.NewSecretReplicator(client, f.ResyncPeriod, f.AllowAll)
-	configMapRepl := replicate.NewConfigMapReplicator(client, f.ResyncPeriod, f.AllowAll)
+	var replicators []replicate.Replicator
+	for _, newReplicator := range(newReplicatorFuncs) {
+		replicators = append(replicators, newReplicator(client, options, f.ResyncPeriod))
+	}
 
 	log.Printf("Starting replicators with prefix \"%s\"", f.AnnotationsPrefix)
-
-	secretRepl.Start()
-
-	configMapRepl.Start()
+	for _, replicator := range(replicators) {
+		replicator.Start()
+	}
 
 	h := liveness.Handler{
-		Replicators: []replicate.Replicator{secretRepl, configMapRepl},
+		Replicators: replicators,
 	}
 
 	log.Printf("starting liveness monitor at %s", f.StatusAddr)

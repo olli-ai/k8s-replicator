@@ -64,7 +64,7 @@ func Test_targetPattern(t *testing.T) {
 	}}
 	namespaces := map[string][]string{}
 	paths := map[string][]string{}
-	for _, example := range(examples) {
+	for _, example := range examples {
 		pattern, err := regexp.Compile(`^(?:`+example.pattern+`)$`)
 		require.NoError(t, err, example.name)
 		target := targetPattern{pattern, "my-name"}
@@ -94,7 +94,7 @@ func Test_targetPattern(t *testing.T) {
 				example.namespace+"/my-name")
 		}
 	}
-	for p, ns := range(namespaces) {
+	for p, ns := range namespaces {
 		pattern, err := regexp.Compile(`^(?:`+p+`)$`)
 		require.NoError(t, err, p)
 		target := targetPattern{pattern, "my-name"}
@@ -244,10 +244,12 @@ func Test_isReplicationAllowed(t *testing.T) {
 		true,
 		false,
 	}}
-	for _, example := range(examples) {
-		props := &replicatorProps{
+	for _, example := range examples {
+		props := &ReplicatorProps{
 			Name: "test",
-			allowAll: example.allowAll,
+			ReplicatorOptions: ReplicatorOptions{
+				AllowAll: example.allowAll,
+			},
 		}
 		target := &metav1.ObjectMeta{
 			Name:      "target",
@@ -357,10 +359,10 @@ func Test_needsDataUpdate(t *testing.T) {
 		true,
 		false,
 	}}
-	props := &replicatorProps{
+	props := &ReplicatorProps{
 		Name: "test",
 	}
-	for _, example := range(examples) {
+	for _, example := range examples {
 		target := &metav1.ObjectMeta{
 			Name:        "target",
 			Namespace:   "target-ns",
@@ -479,10 +481,10 @@ func Test_needsFromAnnotationsUpdate(t *testing.T) {
 		false,
 		false,
 	}}
-	props := &replicatorProps{
+	props := &ReplicatorProps{
 		Name: "test",
 	}
-	for _, example := range(examples) {
+	for _, example := range examples {
 		target := &metav1.ObjectMeta{
 			Name:        "target",
 			Namespace:   "target-ns",
@@ -578,10 +580,10 @@ func Test_needsAllowedAnnotationsUpdate(t *testing.T) {
 		true,
 		false,
 	}}
-	props := &replicatorProps{
+	props := &ReplicatorProps{
 		Name: "test",
 	}
-	for _, example := range(examples) {
+	for _, example := range examples {
 		target := &metav1.ObjectMeta{
 			Name:        "target",
 			Namespace:   "target-ns",
@@ -625,10 +627,10 @@ func Test_isReplicatedBy(t *testing.T) {
 		M{ReplicatedByAnnotation: "other-ns/source"},
 		false,
 	}}
-	props := &replicatorProps{
+	props := &ReplicatorProps{
 		Name: "test",
 	}
-	for _, example := range(examples) {
+	for _, example := range examples {
 		target := &metav1.ObjectMeta{
 			Name:        "target",
 			Namespace:   "target-ns",
@@ -812,10 +814,10 @@ func Test_isReplicatedTo(t *testing.T) {
 		true,
 		false,
 	}}
-	props := &replicatorProps{
+	props := &ReplicatorProps{
 		Name: "test",
 	}
-	for _, example := range(examples) {
+	for _, example := range examples {
 		source := &metav1.ObjectMeta{
 			Name:        "source",
 			Namespace:   "source-ns",
@@ -1053,10 +1055,10 @@ func Test_getReplicationTargets(t *testing.T) {
 		[]P{{"[abc]", "abc"}, {"[ghi]", "abc"}, {"[abc]", "source"}, {"[ghi]", "source"}},
 		false,
 	}}
-	props := &replicatorProps{
+	props := &ReplicatorProps{
 		Name: "test",
 	}
-	for _, example := range(examples) {
+	for _, example := range examples {
 		source := &metav1.ObjectMeta{
 			Name:        "source",
 			Namespace:   "source-ns",
@@ -1070,13 +1072,13 @@ func Test_getReplicationTargets(t *testing.T) {
 		} else {
 			assert.ElementsMatch(t, example.paths, paths, example.name)
 			patternsCopy := make([]P, len(patterns))
-			for i, p := range(patterns) {
+			for i, p := range patterns {
 				patternsCopy[i] = P{
 					p.namespace.String(),
 					p.name,
 				}
 			}
-			for i, p := range(example.patterns) {
+			for i, p := range example.patterns {
 				example.patterns[i].namespace = `^(?:`+p.namespace+`)$`
 			}
 			assert.ElementsMatch(t, example.patterns, patternsCopy, example.name)
@@ -1102,7 +1104,7 @@ func Test_resolveAnnotation(t *testing.T) {
 		"my-ns/my-name",
 		"my-ns/my-name",
 	}}
-	for _, example := range(examples) {
+	for _, example := range examples {
 		object := &metav1.ObjectMeta{
 			Name:        "object",
 			Namespace:   "object-ns",
@@ -1155,7 +1157,7 @@ func Test_annotationRefersTo(t *testing.T) {
 		"target-ns",
 		false,
 	}}
-	for _, example := range(examples) {
+	for _, example := range examples {
 		source := &metav1.ObjectMeta{
 			Name:        "source",
 			Namespace:   "source-ns",

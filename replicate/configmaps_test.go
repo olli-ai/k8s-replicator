@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestConfigMap_getMeta(t *testing.T) {
+func TestConfigMap_GetMeta(t *testing.T) {
 	object := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "test-ns",
@@ -29,10 +29,10 @@ func TestConfigMap_getMeta(t *testing.T) {
 		},
 	}
 	copy := object.ObjectMeta.DeepCopy()
-	assert.Equal(t, copy, _configMapActions.getMeta(object))
+	assert.Equal(t, copy, _configMapActions.GetMeta(object))
 }
 
-func TestConfigMap_update(t *testing.T) {
+func TestConfigMap_Update(t *testing.T) {
 	replicator, watcher := createReplicator(_configMapActions, "test-ns")
 	require.Equal(t, 0, len(watcher.Actions), "len(actions)")
 	configmaps := replicator.client.CoreV1().ConfigMaps("test-ns")
@@ -85,7 +85,7 @@ func TestConfigMap_update(t *testing.T) {
 
 	old2 := old.DeepCopy()
 	source2 := source.DeepCopy()
-	err = _configMapActions.update(replicator, old2, source2, annotations)
+	store, err := _configMapActions.Update(replicator.client, old2, source2, annotations)
 	require.NoError(t, err)
 	assert.Equal(t, old, old2, "old changed")
 	assert.Equal(t, source, source2, "source changed")
@@ -118,13 +118,13 @@ func TestConfigMap_update(t *testing.T) {
 	assert.Equal(t, expected, sent, "sent")
 	expected.ObjectMeta.ResourceVersion = new.ObjectMeta.ResourceVersion
 	assert.Equal(t, expected, new, "new")
-	stored, ok, err := replicator.objectStore.GetByKey("test-ns/test-update")
-	require.NoError(t, err, "store")
-	require.True(t, ok, "store")
-	assert.Equal(t, expected, stored.(*v1.ConfigMap), "store")
+	new, ok = store.(*v1.ConfigMap)
+	if assert.True(t, ok, "store") {
+		assert.Equal(t, expected, new, "store")
+	}
 }
 
-func TestConfigMap_clear(t *testing.T) {
+func TestConfigMap_Clear(t *testing.T) {
 	replicator, watcher := createReplicator(_configMapActions, "test-ns")
 	require.Equal(t, 0, len(watcher.Actions), "len(actions)")
 	configmaps := replicator.client.CoreV1().ConfigMaps("test-ns")
@@ -157,7 +157,7 @@ func TestConfigMap_clear(t *testing.T) {
 	}
 
 	todo2 := todo.DeepCopy()
-	err = _configMapActions.clear(replicator, todo2, annotations)
+	store, err := _configMapActions.Clear(replicator.client, todo2, annotations)
 	require.NoError(t, err)
 	assert.Equal(t, todo, todo2, "todo changed")
 	require.Equal(t, 2, len(watcher.Actions), "len(actions)")
@@ -183,10 +183,10 @@ func TestConfigMap_clear(t *testing.T) {
 	assert.Equal(t, expected, sent, "sent")
 	expected.ObjectMeta.ResourceVersion = new.ObjectMeta.ResourceVersion
 	assert.Equal(t, expected, new, "new")
-	stored, ok, err := replicator.objectStore.GetByKey("test-ns/test-clear")
-	require.NoError(t, err, "store")
-	require.True(t, ok, "store")
-	assert.Equal(t, expected, stored.(*v1.ConfigMap), "store")
+	new, ok = store.(*v1.ConfigMap)
+	if assert.True(t, ok, "store") {
+		assert.Equal(t, expected, new, "store")
+	}
 }
 
 func TestConfigMap_install_create_empty(t *testing.T) {
@@ -224,7 +224,7 @@ func TestConfigMap_install_create_empty(t *testing.T) {
 	}
 
 	source2 := source.DeepCopy()
-	err := _configMapActions.install(replicator, meta, source2, nil)
+	store, err := _configMapActions.Install(replicator.client, meta, source2, nil)
 	require.NoError(t, err)
 	assert.Equal(t, source, source2, "source changed")
 	require.Equal(t, 1, len(watcher.Actions), "len(actions)")
@@ -250,10 +250,10 @@ func TestConfigMap_install_create_empty(t *testing.T) {
 	assert.Equal(t, expected, sent, "sent")
 	expected.ObjectMeta.ResourceVersion = new.ObjectMeta.ResourceVersion
 	assert.Equal(t, expected, new, "new")
-	stored, ok, err := replicator.objectStore.GetByKey("test-ns/test-install")
-	require.NoError(t, err, "store")
-	require.True(t, ok, "store")
-	assert.Equal(t, expected, stored.(*v1.ConfigMap), "store")
+	new, ok = store.(*v1.ConfigMap)
+	if assert.True(t, ok, "store") {
+		assert.Equal(t, expected, new, "store")
+	}
 }
 
 func TestConfigMap_install_update_empty(t *testing.T) {
@@ -313,7 +313,7 @@ func TestConfigMap_install_update_empty(t *testing.T) {
 	}
 
 	source2 := source.DeepCopy()
-	err = _configMapActions.install(replicator, meta, source2, nil)
+	store, err := _configMapActions.Install(replicator.client, meta, source2, nil)
 	require.NoError(t, err)
 	assert.Equal(t, source, source2, "source changed")
 	require.Equal(t, 2, len(watcher.Actions), "len(actions)")
@@ -339,10 +339,10 @@ func TestConfigMap_install_update_empty(t *testing.T) {
 	assert.Equal(t, expected, sent, "sent")
 	expected.ObjectMeta.ResourceVersion = new.ObjectMeta.ResourceVersion
 	assert.Equal(t, expected, new, "new")
-	stored, ok, err := replicator.objectStore.GetByKey("test-ns/test-install")
-	require.NoError(t, err, "store")
-	require.True(t, ok, "store")
-	assert.Equal(t, expected, stored.(*v1.ConfigMap), "store")
+	new, ok = store.(*v1.ConfigMap)
+	if assert.True(t, ok, "store") {
+		assert.Equal(t, expected, new, "store")
+	}
 }
 
 func TestConfigMap_install_create_data(t *testing.T) {
@@ -400,7 +400,7 @@ func TestConfigMap_install_create_data(t *testing.T) {
 
 	source2 := source.DeepCopy()
 	copy2 := copy.DeepCopy()
-	err := _configMapActions.install(replicator, meta, source2, copy2)
+	store, err := _configMapActions.Install(replicator.client, meta, source2, copy2)
 	require.NoError(t, err)
 	assert.Equal(t, source, source2, "source changed")
 	assert.Equal(t, copy, copy2, "copy changed")
@@ -433,10 +433,10 @@ func TestConfigMap_install_create_data(t *testing.T) {
 	assert.Equal(t, expected, sent, "sent")
 	expected.ObjectMeta.ResourceVersion = new.ObjectMeta.ResourceVersion
 	assert.Equal(t, expected, new, "new")
-	stored, ok, err := replicator.objectStore.GetByKey("test-ns/test-install")
-	require.NoError(t, err, "store")
-	require.True(t, ok, "store")
-	assert.Equal(t, expected, stored.(*v1.ConfigMap), "store")
+	new, ok = store.(*v1.ConfigMap)
+	if assert.True(t, ok, "store") {
+		assert.Equal(t, expected, new, "store")
+	}
 }
 
 func TestConfigMap_install_update_data(t *testing.T) {
@@ -516,7 +516,7 @@ func TestConfigMap_install_update_data(t *testing.T) {
 
 	source2 := source.DeepCopy()
 	copy2 := copy.DeepCopy()
-	err = _configMapActions.install(replicator, meta, source2, copy2)
+	store, err := _configMapActions.Install(replicator.client, meta, source2, copy2)
 	require.NoError(t, err)
 	assert.Equal(t, source, source2, "source changed")
 	assert.Equal(t, copy, copy2, "copy changed")
@@ -549,13 +549,13 @@ func TestConfigMap_install_update_data(t *testing.T) {
 	assert.Equal(t, expected, sent, "sent")
 	expected.ObjectMeta.ResourceVersion = new.ObjectMeta.ResourceVersion
 	assert.Equal(t, expected, new, "new")
-	stored, ok, err := replicator.objectStore.GetByKey("test-ns/test-install")
-	require.NoError(t, err, "store")
-	require.True(t, ok, "store")
-	assert.Equal(t, expected, stored.(*v1.ConfigMap), "store")
+	new, ok = store.(*v1.ConfigMap)
+	if assert.True(t, ok, "store") {
+		assert.Equal(t, expected, new, "store")
+	}
 }
 
-func TestConfigMap_delete(t *testing.T) {
+func TestConfigMap_Delete(t *testing.T) {
 	replicator, watcher := createReplicator(_configMapActions, "test-ns")
 	require.Equal(t, 0, len(watcher.Actions), "len(actions)")
 	configmaps := replicator.client.CoreV1().ConfigMaps("test-ns")
@@ -583,7 +583,7 @@ func TestConfigMap_delete(t *testing.T) {
 	require.Equal(t, 1, len(watcher.Actions), "len(actions)")
 
 	todo2 := todo.DeepCopy()
-	err = _configMapActions.delete(replicator, todo2)
+	err = _configMapActions.Delete(replicator.client, todo2)
 	require.NoError(t, err)
 	assert.Equal(t, todo, todo2, "todo changed")
 	require.Equal(t, 2, len(watcher.Actions), "len(actions)")
@@ -592,15 +592,12 @@ func TestConfigMap_delete(t *testing.T) {
 	// TODO: test delete option (impossible with the current implementation)
 	_, err = configmaps.Get("test-clear", metav1.GetOptions{})
 	require.Error(t, err)
-	_, ok, err := replicator.objectStore.GetByKey("test-ns/test-install")
-	require.NoError(t, err, "store")
-	assert.False(t, ok, "store")
 }
 
 func TestNewConfigMapReplicator(t *testing.T) {
 	hour, err := time.ParseDuration("1h")
 	require.NoError(t, err)
-	second, err := time.ParseDuration("0.2s")
+	second, err := time.ParseDuration("0.5s")
 	require.NoError(t, err)
 	client := fake.NewSimpleClientset(&v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -615,7 +612,7 @@ func TestNewConfigMapReplicator(t *testing.T) {
 			Name: "target-1",
 		},
 	})
-	replicator := NewConfigMapReplicator(client, hour, true)
+	replicator := NewConfigMapReplicator(client, ReplicatorOptions{AllowAll: true}, hour)
 	replicator.Start()
 	_, err = client.CoreV1().ConfigMaps("from-ns").Create(&v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{

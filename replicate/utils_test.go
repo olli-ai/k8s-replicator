@@ -11,6 +11,10 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+func init() {
+	PrefixAnnotations("test-prefix")
+}
+
 type M = map[string]string
 type MB = map[string][]byte
 
@@ -27,9 +31,9 @@ func (w *actionsWatcher) react(action testing.Action) (bool, runtime.Object, err
 	return false, nil, nil
 }
 
-func createReplicator(actions replicatorActions, namespaces ...string) (*replicatorProps, *actionsWatcher) {
+func createReplicator(actions ReplicatorActions, namespaces ...string) (*ReplicatorProps, *actionsWatcher) {
 	objects := []runtime.Object{}
-	for _, ns := range(namespaces) {
+	for _, ns := range namespaces {
 		objects = append(objects, &v1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: ns,
@@ -40,10 +44,10 @@ func createReplicator(actions replicatorActions, namespaces ...string) (*replica
 	watcher := &actionsWatcher{}
 	client.PrependReactor("*", "*", watcher.react)
 	store := cache.NewStore(func(object interface{}) (string, error) {
-		meta := actions.getMeta(object)
+		meta := actions.GetMeta(object)
 		return fmt.Sprintf("%s/%s", meta.Namespace, meta.Name), nil
 	})
-	return &replicatorProps{
+	return &ReplicatorProps{
 		client: client,
 		objectStore: store,
 	}, watcher

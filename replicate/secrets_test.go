@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSecret_getMeta(t *testing.T) {
+func TestSecret_GetMeta(t *testing.T) {
 	object := &v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "test-ns",
@@ -27,10 +27,10 @@ func TestSecret_getMeta(t *testing.T) {
 		},
 	}
 	copy := object.ObjectMeta.DeepCopy()
-	assert.Equal(t, copy, _secretActions.getMeta(object))
+	assert.Equal(t, copy, _secretActions.GetMeta(object))
 }
 
-func TestSecret_update(t *testing.T) {
+func TestSecret_Update(t *testing.T) {
 	replicator, watcher := createReplicator(_secretActions, "test-ns")
 	require.Equal(t, 0, len(watcher.Actions), "len(actions)")
 	secrets := replicator.client.CoreV1().Secrets("test-ns")
@@ -77,7 +77,7 @@ func TestSecret_update(t *testing.T) {
 
 	old2 := old.DeepCopy()
 	source2 := source.DeepCopy()
-	err = _secretActions.update(replicator, old2, source2, annotations)
+	store, err := _secretActions.Update(replicator.client, old2, source2, annotations)
 	require.NoError(t, err)
 	assert.Equal(t, old, old2, "old changed")
 	assert.Equal(t, source, source2, "source changed")
@@ -107,13 +107,13 @@ func TestSecret_update(t *testing.T) {
 	assert.Equal(t, expected, sent, "sent")
 	expected.ObjectMeta.ResourceVersion = new.ObjectMeta.ResourceVersion
 	assert.Equal(t, expected, new, "new")
-	stored, ok, err := replicator.objectStore.GetByKey("test-ns/test-update")
-	require.NoError(t, err, "store")
-	require.True(t, ok, "store")
-	assert.Equal(t, expected, stored.(*v1.Secret), "store")
+	new, ok = store.(*v1.Secret)
+	if assert.True(t, ok, "store") {
+		assert.Equal(t, expected, new, "store")
+	}
 }
 
-func TestSecret_clear(t *testing.T) {
+func TestSecret_Clear(t *testing.T) {
 	replicator, watcher := createReplicator(_secretActions, "test-ns")
 	require.Equal(t, 0, len(watcher.Actions), "len(actions)")
 	secrets := replicator.client.CoreV1().Secrets("test-ns")
@@ -143,7 +143,7 @@ func TestSecret_clear(t *testing.T) {
 	}
 
 	todo2 := todo.DeepCopy()
-	err = _secretActions.clear(replicator, todo2, annotations)
+	store, err := _secretActions.Clear(replicator.client, todo2, annotations)
 	require.NoError(t, err)
 	assert.Equal(t, todo, todo2, "todo changed")
 	require.Equal(t, 2, len(watcher.Actions), "len(actions)")
@@ -169,10 +169,10 @@ func TestSecret_clear(t *testing.T) {
 	assert.Equal(t, expected, sent, "sent")
 	expected.ObjectMeta.ResourceVersion = new.ObjectMeta.ResourceVersion
 	assert.Equal(t, expected, new, "new")
-	stored, ok, err := replicator.objectStore.GetByKey("test-ns/test-clear")
-	require.NoError(t, err, "store")
-	require.True(t, ok, "store")
-	assert.Equal(t, expected, stored.(*v1.Secret), "store")
+	new, ok = store.(*v1.Secret)
+	if assert.True(t, ok, "store") {
+		assert.Equal(t, expected, new, "store")
+	}
 }
 
 func TestSecret_install_create_empty(t *testing.T) {
@@ -207,7 +207,7 @@ func TestSecret_install_create_empty(t *testing.T) {
 	}
 
 	source2 := source.DeepCopy()
-	err := _secretActions.install(replicator, meta, source2, nil)
+	store, err := _secretActions.Install(replicator.client, meta, source2, nil)
 	require.NoError(t, err)
 	assert.Equal(t, source, source2, "source changed")
 	require.Equal(t, 1, len(watcher.Actions), "len(actions)")
@@ -233,10 +233,10 @@ func TestSecret_install_create_empty(t *testing.T) {
 	assert.Equal(t, expected, sent, "sent")
 	expected.ObjectMeta.ResourceVersion = new.ObjectMeta.ResourceVersion
 	assert.Equal(t, expected, new, "new")
-	stored, ok, err := replicator.objectStore.GetByKey("test-ns/test-install")
-	require.NoError(t, err, "store")
-	require.True(t, ok, "store")
-	assert.Equal(t, expected, stored.(*v1.Secret), "store")
+	new, ok = store.(*v1.Secret)
+	if assert.True(t, ok, "store") {
+		assert.Equal(t, expected, new, "store")
+	}
 }
 
 func TestSecret_install_update_empty(t *testing.T) {
@@ -290,7 +290,7 @@ func TestSecret_install_update_empty(t *testing.T) {
 	}
 
 	source2 := source.DeepCopy()
-	err = _secretActions.install(replicator, meta, source2, nil)
+	store, err := _secretActions.Install(replicator.client, meta, source2, nil)
 	require.NoError(t, err)
 	assert.Equal(t, source, source2, "source changed")
 	require.Equal(t, 2, len(watcher.Actions), "len(actions)")
@@ -316,11 +316,10 @@ func TestSecret_install_update_empty(t *testing.T) {
 	assert.Equal(t, expected, sent, "sent")
 	expected.ObjectMeta.ResourceVersion = new.ObjectMeta.ResourceVersion
 	assert.Equal(t, expected, new, "new")
-	stored, ok, err := replicator.objectStore.GetByKey("test-ns/test-install")
-	require.NoError(t, err, "store")
-	require.True(t, ok, "store")
-	assert.Equal(t, expected, stored.(*v1.Secret), "store")
-}
+	new, ok = store.(*v1.Secret)
+	if assert.True(t, ok, "store") {
+		assert.Equal(t, expected, new, "store")
+	}
 
 func TestSecret_install_create_data(t *testing.T) {
 	replicator, watcher := createReplicator(_secretActions, "test-ns")
@@ -371,7 +370,7 @@ func TestSecret_install_create_data(t *testing.T) {
 
 	source2 := source.DeepCopy()
 	copy2 := copy.DeepCopy()
-	err := _secretActions.install(replicator, meta, source2, copy2)
+	store, err := _secretActions.Install(replicator.client, meta, source2, copy2)
 	require.NoError(t, err)
 	assert.Equal(t, source, source2, "source changed")
 	assert.Equal(t, copy, copy2, "copy changed")
@@ -401,10 +400,10 @@ func TestSecret_install_create_data(t *testing.T) {
 	assert.Equal(t, expected, sent, "sent")
 	expected.ObjectMeta.ResourceVersion = new.ObjectMeta.ResourceVersion
 	assert.Equal(t, expected, new, "new")
-	stored, ok, err := replicator.objectStore.GetByKey("test-ns/test-install")
-	require.NoError(t, err, "store")
-	require.True(t, ok, "store")
-	assert.Equal(t, expected, stored.(*v1.Secret), "store")
+	new, ok = store.(*v1.Secret)
+	if assert.True(t, ok, "store") {
+		assert.Equal(t, expected, new, "store")
+	}
 }
 
 func TestSecret_install_update_data(t *testing.T) {
@@ -475,7 +474,7 @@ func TestSecret_install_update_data(t *testing.T) {
 
 	source2 := source.DeepCopy()
 	copy2 := copy.DeepCopy()
-	err = _secretActions.install(replicator, meta, source2, copy2)
+	store, err := _secretActions.Install(replicator.client, meta, source2, copy2)
 	require.NoError(t, err)
 	assert.Equal(t, source, source2, "source changed")
 	assert.Equal(t, copy, copy2, "copy changed")
@@ -505,13 +504,13 @@ func TestSecret_install_update_data(t *testing.T) {
 	assert.Equal(t, expected, sent, "sent")
 	expected.ObjectMeta.ResourceVersion = new.ObjectMeta.ResourceVersion
 	assert.Equal(t, expected, new, "new")
-	stored, ok, err := replicator.objectStore.GetByKey("test-ns/test-install")
-	require.NoError(t, err, "store")
-	require.True(t, ok, "store")
-	assert.Equal(t, expected, stored.(*v1.Secret), "store")
+	new, ok = store.(*v1.Secret)
+	if assert.True(t, ok, "store") {
+		assert.Equal(t, expected, new, "store")
+	}
 }
 
-func TestSecret_delete(t *testing.T) {
+func TestSecret_Delete(t *testing.T) {
 	replicator, watcher := createReplicator(_secretActions, "test-ns")
 	require.Equal(t, 0, len(watcher.Actions), "len(actions)")
 	secrets := replicator.client.CoreV1().Secrets("test-ns")
@@ -536,7 +535,7 @@ func TestSecret_delete(t *testing.T) {
 	require.Equal(t, 1, len(watcher.Actions), "len(actions)")
 
 	todo2 := todo.DeepCopy()
-	err = _secretActions.delete(replicator, todo2)
+	err = _secretActions.Delete(replicator.client, todo2)
 	require.NoError(t, err)
 	assert.Equal(t, todo, todo2, "todo changed")
 	require.Equal(t, 2, len(watcher.Actions), "len(actions)")
@@ -545,15 +544,12 @@ func TestSecret_delete(t *testing.T) {
 	// TODO: test delete option (impossible with the current implementation)
 	_, err = secrets.Get("test-clear", metav1.GetOptions{})
 	require.Error(t, err)
-	_, ok, err := replicator.objectStore.GetByKey("test-ns/test-install")
-	require.NoError(t, err, "store")
-	assert.False(t, ok, "store")
 }
 
 func TestNewSecretReplicator(t *testing.T) {
 	hour, err := time.ParseDuration("1h")
 	require.NoError(t, err)
-	second, err := time.ParseDuration("0.2s")
+	second, err := time.ParseDuration("0.5s")
 	require.NoError(t, err)
 	client := fake.NewSimpleClientset(&v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -568,7 +564,7 @@ func TestNewSecretReplicator(t *testing.T) {
 			Name: "target-1",
 		},
 	})
-	replicator := NewSecretReplicator(client, hour, true)
+	replicator := NewSecretReplicator(client, ReplicatorOptions{AllowAll: true}, hour)
 	replicator.Start()
 	_, err = client.CoreV1().Secrets("from-ns").Create(&v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{

@@ -7,102 +7,40 @@ import (
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
 )
 
 var _configMapActions *configMapActions = &configMapActions{}
 
 // NewConfigMapReplicator creates a new config map replicator
-func NewConfigMapReplicator(client kubernetes.Interface, resyncPeriod time.Duration, allowAll bool) Replicator {
-	repl := objectReplicator{
-		replicatorProps: replicatorProps{
-			Name:            "config map",
-			allowAll:        allowAll,
-			client:          client,
-
-			targetsFrom:     make(map[string][]string),
-			targetsTo:       make(map[string][]string),
-
-			watchedTargets:  make(map[string][]string),
-			watchedPatterns: make(map[string][]targetPattern),
-		},
-		replicatorActions: _configMapActions,
+func NewConfigMapReplicator(client kubernetes.Interface, options ReplicatorOptions, resyncPeriod time.Duration) Replicator {
+	repl := ObjectReplicator{
+		ReplicatorProps:   NewReplicatorProps(client, "configMap", options),
+		ReplicatorActions: _configMapActions,
 	}
-	// init the namespace informer
-	namespaceStore, namespaceController := cache.NewInformer(
-		&cache.ListWatch{
-			ListFunc: func(lo metav1.ListOptions) (runtime.Object, error) {
-				list, err := client.CoreV1().Namespaces().List(lo)
-				if err != nil {
-					return list, err
-				}
-				// populate the store already, to avoid believing some items are deleted
-				copy := make([]interface{}, len(list.Items))
-				for index := range list.Items {
-					copy[index] = &list.Items[index]
-				}
-				repl.namespaceStore.Replace(copy, "init")
-				return list, err
-			},
-			WatchFunc: func(lo metav1.ListOptions) (watch.Interface, error) {
-				return client.CoreV1().Namespaces().Watch(lo)
-			},
-		},
-		&v1.Namespace{},
-		resyncPeriod,
-		cache.ResourceEventHandlerFuncs{
-			AddFunc:    repl.NamespaceAdded,
-			UpdateFunc: func(old interface{}, new interface{}) {},
-			DeleteFunc: func(obj interface{}) {},
-		},
-	)
-
-	repl.namespaceStore = namespaceStore
-	repl.namespaceController = namespaceController
-	// init the object informer
-	objectStore, objectController := cache.NewInformer(
-		&cache.ListWatch{
-			ListFunc: func(lo metav1.ListOptions) (runtime.Object, error) {
-				list, err := client.CoreV1().ConfigMaps("").List(lo)
-				if err != nil {
-					return list, err
-				}
-				// populate the store already, to avoid believing some items are deleted
-				copy := make([]interface{}, len(list.Items))
-				for index := range list.Items {
-					copy[index] = &list.Items[index]
-				}
-				repl.objectStore.Replace(copy, "init")
-				return list, err
-			},
-			WatchFunc: func(lo metav1.ListOptions) (watch.Interface, error) {
-				return client.CoreV1().ConfigMaps("").Watch(lo)
-			},
-		},
-		&v1.ConfigMap{},
-		resyncPeriod,
-		cache.ResourceEventHandlerFuncs{
-			AddFunc:    repl.ObjectAdded,
-			UpdateFunc: func(old interface{}, new interface{}) { repl.ObjectAdded(new) },
-			DeleteFunc: repl.ObjectDeleted,
-		},
-	)
-
-	repl.objectStore = objectStore
-	repl.objectController = objectController
-
+	listFunc := func(lo metav1.ListOptions) (runtime.Object, []interface{}, error) {
+		list, err := client.CoreV1().ConfigMaps("").List(lo)
+		if err != nil {
+			return list, nil, err
+		}
+		copy := make([]interface{}, len(list.Items))
+		for index := range list.Items {
+			copy[index] = &list.Items[index]
+		}
+		return list, copy, err
+	}
+	watchFunc := client.CoreV1().ConfigMaps("").Watch
+	repl.InitStores(listFunc, watchFunc, &v1.ConfigMap{}, resyncPeriod)
 	return &repl
 }
 
 type configMapActions struct {}
 
-func (*configMapActions) getMeta(object interface{}) *metav1.ObjectMeta {
+func (*configMapActions) GetMeta(object interface{}) *metav1.ObjectMeta {
 	return &object.(*v1.ConfigMap).ObjectMeta
 }
 
-func (*configMapActions) update(r *replicatorProps, object interface{}, sourceObject interface{}, annotations map[string]string) error {
+func (*configMapActions) Update(client kubernetes.Interface, object interface{}, sourceObject interface{}, annotations map[string]string) (interface{}, error) {
 	sourceConfigMap := sourceObject.(*v1.ConfigMap)
 	// copy the configMap
 	configMap := object.(*v1.ConfigMap).DeepCopy()
@@ -131,17 +69,14 @@ func (*configMapActions) update(r *replicatorProps, object interface{}, sourceOb
 
 	log.Printf("updating config map %s/%s", configMap.Namespace, configMap.Name)
 	// update the configMap
-	s, err := r.client.CoreV1().ConfigMaps(configMap.Namespace).Update(configMap)
+	update, err := client.CoreV1().ConfigMaps(configMap.Namespace).Update(configMap)
 	if err != nil {
 		log.Printf("error while updating config map %s/%s: %s", configMap.Namespace, configMap.Name, err)
-		return err
 	}
-	// update the object store in advance, to avoid being disturbed later
-	r.objectStore.Update(s)
-	return nil
+	return update, err
 }
 
-func (*configMapActions) clear(r *replicatorProps, object interface{}, annotations map[string]string) error {
+func (*configMapActions) Clear(client kubernetes.Interface, object interface{}, annotations map[string]string) (interface{}, error) {
 	// copy the configMap
 	configMap := object.(*v1.ConfigMap).DeepCopy()
 	// set the annotations
@@ -153,17 +88,14 @@ func (*configMapActions) clear(r *replicatorProps, object interface{}, annotatio
 
 	log.Printf("clearing config map %s/%s", configMap.Namespace, configMap.Name)
 	// update the configMap
-	s, err := r.client.CoreV1().ConfigMaps(configMap.Namespace).Update(configMap)
+	update, err := client.CoreV1().ConfigMaps(configMap.Namespace).Update(configMap)
 	if err != nil {
 		log.Printf("error while clearing config map %s/%s", configMap.Namespace, configMap.Name)
-		return err
 	}
-	// update the object store in advance, to avoid being disturbed later
-	r.objectStore.Update(s)
-	return nil
+	return update, err
 }
 
-func (*configMapActions) install(r *replicatorProps, meta *metav1.ObjectMeta, sourceObject interface{}, dataObject interface{}) error {
+func (*configMapActions) Install(client kubernetes.Interface, meta *metav1.ObjectMeta, sourceObject interface{}, dataObject interface{}) (interface{}, error) {
 	sourceConfigMap := sourceObject.(*v1.ConfigMap)
 	// create a new configMap
 	configMap := v1.ConfigMap{
@@ -196,26 +128,23 @@ func (*configMapActions) install(r *replicatorProps, meta *metav1.ObjectMeta, so
 
 	log.Printf("installing config map %s/%s", configMap.Namespace, configMap.Name)
 
-	var s *v1.ConfigMap
+	var update *v1.ConfigMap
 	var err error
 	if configMap.ResourceVersion == "" {
 		// create the configMap
-		s, err = r.client.CoreV1().ConfigMaps(configMap.Namespace).Create(&configMap)
+		update, err = client.CoreV1().ConfigMaps(configMap.Namespace).Create(&configMap)
 	} else {
 		// update the configMap
-		s, err = r.client.CoreV1().ConfigMaps(configMap.Namespace).Update(&configMap)
+		update, err = client.CoreV1().ConfigMaps(configMap.Namespace).Update(&configMap)
 	}
 
 	if err != nil {
 		log.Printf("error while installing config map %s/%s: %s", configMap.Namespace, configMap.Name, err)
-		return err
 	}
-	// update the object store in advance, to avoid being disturbed later
-	r.objectStore.Update(s)
-	return nil
+	return update, err
 }
 
-func (*configMapActions) delete(r *replicatorProps, object interface{}) error {
+func (*configMapActions) Delete(client kubernetes.Interface, object interface{}) error {
 	configMap := object.(*v1.ConfigMap)
 	log.Printf("deleting config map %s/%s", configMap.Namespace, configMap.Name)
 	// prepare the delete options
@@ -225,12 +154,9 @@ func (*configMapActions) delete(r *replicatorProps, object interface{}) error {
 		},
 	}
 	// delete the configMap
-	err := r.client.CoreV1().ConfigMaps(configMap.Namespace).Delete(configMap.Name, &options)
+	err := client.CoreV1().ConfigMaps(configMap.Namespace).Delete(configMap.Name, &options)
 	if err != nil {
 		log.Printf("error while deleting config map %s/%s: %s", configMap.Namespace, configMap.Name, err)
-		return err
 	}
-	// update the object store in advance, to avoid being disturbed later
-	r.objectStore.Delete(configMap)
-	return nil
+	return err
 }

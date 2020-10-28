@@ -27,6 +27,12 @@ spec:
         - /k8s-replicator
         - --prefix
         - {{ template "k8s-replicator.prefix" . }}
+        {{- if .Values.allowAll }}
+        - --allow-all
+        {{- end }}
+        {{- if .Values.ignoreUnknown }}
+        - --ignore-unknown
+        {{- end }}
         ports:
         - name: health
           containerPort: 9102

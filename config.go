@@ -9,4 +9,5 @@ type flags struct {
 	ResyncPeriod      time.Duration
 	StatusAddr        string
 	AllowAll          bool
+	IgnoreUnknown     bool
 }

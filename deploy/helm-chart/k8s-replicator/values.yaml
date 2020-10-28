@@ -10,6 +10,8 @@ image:
 nameOverride: ""
 fullnameOverride: ""
 prefixOverride: ""
+allowAll: false
+ignoreUnknown: false
 
 resources:
   limits:

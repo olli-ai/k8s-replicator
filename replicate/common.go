@@ -50,11 +50,18 @@ func (pattern targetPattern) Targets(namespaces []string) []string {
 	return targets
 }
 
-type replicatorProps struct {
+type ReplicatorOptions struct {
+	// when true, "allowed" annotations are ignored
+	AllowAll      bool
+	// when false, any unknown annotation will make the replicator fail
+	IgnoreUnknown bool
+}
+
+type ReplicatorProps struct {
 	// displayed name for the resources
 	Name                string
-	// when true, "allowed" annotations are ignored
-	allowAll            bool
+	// various options
+	ReplicatorOptions
 	// the kubernetes client to use
 	client              kubernetes.Interface
 
@@ -72,9 +79,9 @@ type replicatorProps struct {
 	targetsTo           map[string][]string
 
 	// a {source => targets} map for all the targeted objects
-	watchedTargets   map[string][]string
+	watchedTargets      map[string][]string
 	// a {source => targetPatterns} for all the targeted objects
-	watchedPatterns   map[string][]targetPattern
+	watchedPatterns     map[string][]targetPattern
 }
 
 // Replicator describes the common interface that the secret and configmap
@@ -82,6 +89,20 @@ type replicatorProps struct {
 type Replicator interface {
 	Start()
 	Synced() bool
+}
+
+func NewReplicatorProps(client kubernetes.Interface, name string, options ReplicatorOptions) ReplicatorProps {
+	return ReplicatorProps {
+		Name:                name,
+		ReplicatorOptions:   options,
+		client:              client,
+
+		targetsFrom:         map[string][]string{},
+		targetsTo:           map[string][]string{},
+
+		watchedTargets:      map[string][]string{},
+		watchedPatterns:     map[string][]targetPattern{},
+	}
 }
 
 // Checks if replication is allowed in annotations of the source object.
@@ -94,12 +115,12 @@ type Replicator interface {
 //	- allowed: true if replication is allowed.
 //  - disallowed: true if replication is explicitely or implicitely disallowed
 //	- err: if the replication is not allowed, an error message
-func (r *replicatorProps) isReplicationAllowed(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, bool, error) {
+func (r *ReplicatorProps) isReplicationAllowed(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, bool, error) {
 	// read the annotations
 	annotationAllowed, ok := sourceObject.Annotations[ReplicationAllowedAnnotation]
 	annotationAllowedNs, okNs := sourceObject.Annotations[ReplicationAllowedNsAnnotation]
-	// unless allowAll, explicit permission is required
-	if !r.allowAll && !ok && !okNs {
+	// unless AllowAll, explicit permission is required
+	if !r.AllowAll && !ok && !okNs {
 		return false, true, fmt.Errorf("source %s/%s does not explicitely allow replication",
 			sourceObject.Namespace, sourceObject.Name)
 	}
@@ -159,7 +180,7 @@ func (r *replicatorProps) isReplicationAllowed(object *metav1.ObjectMeta, source
 //	- ok: true if an update is needed
 //	- once: true if no update is needed because the object is replicated once
 //	- err: an error message if no update is needed
-func (r *replicatorProps) needsDataUpdate(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, bool, error) {
+func (r *ReplicatorProps) needsDataUpdate(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, bool, error) {
 	// target was "replicated" from a delete source, or never replicated
 	if targetVersion, ok := object.Annotations[ReplicatedFromVersionAnnotation]; !ok {
 		return true, false, nil
@@ -215,7 +236,7 @@ func (r *replicatorProps) needsDataUpdate(object *metav1.ObjectMeta, sourceObjec
 // Returns:
 //	- ok: true if an update is needed
 //	- err: an error message if an annotation is invalid
-func (r *replicatorProps) needsFromAnnotationsUpdate(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, error) {
+func (r *ReplicatorProps) needsFromAnnotationsUpdate(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, error) {
 	update := false
 	// check the "from" annotation
 	// the source "from" annotation is missing
@@ -257,7 +278,7 @@ func (r *replicatorProps) needsFromAnnotationsUpdate(object *metav1.ObjectMeta, 
 // Returns:
 //	- ok: true if an update is needed
 //	- err: an error message if an annotation is invalid
-func (r *replicatorProps) needsAllowedAnnotationsUpdate(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, error) {
+func (r *ReplicatorProps) needsAllowedAnnotationsUpdate(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, error) {
 	update := false
 
 	allowed, okA := sourceObject.Annotations[ReplicationAllowedAnnotation]
@@ -300,7 +321,7 @@ func (r *replicatorProps) needsAllowedAnnotationsUpdate(object *metav1.ObjectMet
 // Returns:
 //	- ok: true if the target was replicated by the source
 //	- err: an error message if it was not
-func (r *replicatorProps) isReplicatedBy(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, error) {
+func (r *ReplicatorProps) isReplicatedBy(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) (bool, error) {
 	// make sure that the target object was created from the source
 	if annotationFrom, ok := object.Annotations[ReplicatedByAnnotation]; !ok {
 		return false, fmt.Errorf("target %s/%s was not replicated",
@@ -319,7 +340,7 @@ func (r *replicatorProps) isReplicatedBy(object *metav1.ObjectMeta, sourceObject
 // Returns:
 //	- ok: true if the source is replicated to the target
 //	- err: an error message only if the annotations were incorrect
-func (r *replicatorProps) isReplicatedTo(object *metav1.ObjectMeta, targetObject *metav1.ObjectMeta) (bool, error) {
+func (r *ReplicatorProps) isReplicatedTo(object *metav1.ObjectMeta, targetObject *metav1.ObjectMeta) (bool, error) {
 	targets, targetPatterns, err := r.getReplicationTargets(object)
 	if err != nil {
 		return false, err
@@ -348,7 +369,7 @@ func (r *replicatorProps) isReplicatedTo(object *metav1.ObjectMeta, targetObject
 // - targets: a slice of all fully qualified target. Items are unique, does not contain object itself
 // - targetPatterns: a slice of targetPattern, using regex to identify if a namespace is matched
 //                   two patterns can generate the same target, and even the object itself
-func (r *replicatorProps) getReplicationTargets(object *metav1.ObjectMeta) ([]string, []targetPattern, error) {
+func (r *ReplicatorProps) getReplicationTargets(object *metav1.ObjectMeta) ([]string, []targetPattern, error) {
 	annotationTo, okTo := object.Annotations[ReplicateToAnnotation]
 	annotationToNs, okToNs := object.Annotations[ReplicateToNsAnnotation]
 	if !okTo && !okToNs {

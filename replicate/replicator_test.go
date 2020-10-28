@@ -8,6 +8,7 @@ import (
 
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/stretchr/testify/assert"
@@ -39,12 +40,13 @@ type testAction struct{
 
 type testActions struct {
 	T       *testing.T
+	Store   cache.Store
 	Incr    int
 	Actions []*testAction
 }
 
-func hasConflict(r *replicatorProps, meta *metav1.ObjectMeta) (bool, error) {
-	current, ok, err := r.objectStore.Get(&testObject{
+func hasConflict(a *testActions, meta *metav1.ObjectMeta) (bool, error) {
+	current, ok, err := a.Store.Get(&testObject{
 		Meta: *meta,
 	})
 	if err != nil {
@@ -56,14 +58,14 @@ func hasConflict(r *replicatorProps, meta *metav1.ObjectMeta) (bool, error) {
 	return meta.ResourceVersion != current.(*testObject).Meta.ResourceVersion, nil
 }
 
-func (*testActions) getMeta(object interface{}) *metav1.ObjectMeta {
+func (*testActions) GetMeta(object interface{}) *metav1.ObjectMeta {
 	return &object.(*testObject).Meta
 }
 
-func (a *testActions) update(r *replicatorProps, object interface{}, sourceObject interface{}, annotations map[string]string) error {
+func (a *testActions) Update(client kubernetes.Interface, object interface{}, sourceObject interface{}, annotations map[string]string) (interface{}, error) {
 	target := object.(*testObject)
 	source := sourceObject.(*testObject)
-	conflict, err := hasConflict(r, &target.Meta)
+	conflict, err := hasConflict(a, &target.Meta)
 	require.NoError(a.T, err)
 	action := &testAction{
 		Action: "update",
@@ -75,23 +77,22 @@ func (a *testActions) update(r *replicatorProps, object interface{}, sourceObjec
 		},
 	}
 	m := map[string]string{}
-	for k, v := range(annotations) {
+	for k, v := range annotations {
 		m[k] = v
 	}
 	action.Object.Meta.Annotations = m
 	a.Actions = append(a.Actions, action)
 	if conflict {
 		log.Printf("update conflict %s/%s", target.Meta.Namespace, target.Meta.Name)
-		return fmt.Errorf("conflict %s/%s", target.Meta.Namespace, target.Meta.Name)
+		return nil, fmt.Errorf("conflict %s/%s", target.Meta.Namespace, target.Meta.Name)
 	}
 	log.Printf("updating test %s/%s with data \"%s\"", target.Meta.Namespace, target.Meta.Name, source.Data)
-	require.NoError(a.T, r.objectStore.Update(action.Object.Refresh(a)))
-	return nil
+	return action.Object.Refresh(a), nil
 }
 
-func (a *testActions) clear(r *replicatorProps, object interface{}, annotations map[string]string) error {
+func (a *testActions) Clear(client kubernetes.Interface, object interface{}, annotations map[string]string) (interface{}, error) {
 	target := object.(*testObject)
-	conflict, err := hasConflict(r, &target.Meta)
+	conflict, err := hasConflict(a, &target.Meta)
 	require.NoError(a.T, err)
 	action := &testAction{
 		Action: "clear",
@@ -103,27 +104,26 @@ func (a *testActions) clear(r *replicatorProps, object interface{}, annotations 
 		},
 	}
 	m := map[string]string{}
-	for k, v := range(annotations) {
+	for k, v := range annotations {
 		m[k] = v
 	}
 	action.Object.Meta.Annotations = m
 	a.Actions = append(a.Actions, action)
 	if conflict {
 		log.Printf("clear conflict %s/%s", target.Meta.Namespace, target.Meta.Name)
-		return fmt.Errorf("conflict %s/%s", target.Meta.Namespace, target.Meta.Name)
+		return nil, fmt.Errorf("conflict %s/%s", target.Meta.Namespace, target.Meta.Name)
 	}
 	log.Printf("clearing test %s/%s", target.Meta.Namespace, target.Meta.Name)
-	require.NoError(a.T, r.objectStore.Update(action.Object.Refresh(a)))
-	return nil
+	return action.Object.Refresh(a), nil
 }
 
-func (a *testActions) install(r *replicatorProps, meta *metav1.ObjectMeta, sourceObject interface{}, dataObject interface{}) error {
+func (a *testActions) Install(client kubernetes.Interface, meta *metav1.ObjectMeta, sourceObject interface{}, dataObject interface{}) (interface{}, error) {
 	source := sourceObject.(*testObject)
 	data := ""
 	if dataObject != nil {
 		data = dataObject.(*testObject).Data
 	}
-	conflict, err := hasConflict(r, meta)
+	conflict, err := hasConflict(a, meta)
 	require.NoError(a.T, err)
 	action := &testAction{
 		Action: "install",
@@ -137,16 +137,15 @@ func (a *testActions) install(r *replicatorProps, meta *metav1.ObjectMeta, sourc
 	a.Actions = append(a.Actions, action)
 	if conflict {
 		log.Printf("install conflict %s/%s", meta.Namespace, meta.Name)
-		return fmt.Errorf("conflict %s/%s", meta.Namespace, meta.Name)
+		return nil, fmt.Errorf("conflict %s/%s", meta.Namespace, meta.Name)
 	}
 	log.Printf("installing test %s/%s with type \"%s\" and data \"%s\"", meta.Namespace, meta.Name, source.Type, data)
-	require.NoError(a.T, r.objectStore.Update(action.Object.Refresh(a)))
-	return nil
+	return action.Object.Refresh(a), nil
 }
 
-func (a *testActions) delete(r *replicatorProps, object interface{}) error {
+func (a *testActions) Delete(client kubernetes.Interface, object interface{}) error {
 	target := object.(*testObject)
-	conflict, err := hasConflict(r, &target.Meta)
+	conflict, err := hasConflict(a, &target.Meta)
 	require.NoError(a.T, err)
 	action := &testAction{
 		Action: "delete",
@@ -163,7 +162,7 @@ func (a *testActions) delete(r *replicatorProps, object interface{}) error {
 		return fmt.Errorf("conflict %s/%s", target.Meta.Namespace, target.Meta.Name)
 	}
 	log.Printf("deleting test %s/%s", target.Meta.Namespace, target.Meta.Name)
-	require.NoError(a.T, r.objectStore.Delete(&action.Object))
+	require.NoError(a.T, a.Store.Delete(&action.Object))
 	return nil
 }
 
@@ -176,28 +175,24 @@ func namespaceKey(object interface{}) (string, error) {
 	return object.(*v1.Namespace).Name, nil
 }
 
-func createTestReplicator(t *testing.T, allowAll bool, namespaces ...string) *objectReplicator {
-	replicator := &objectReplicator{
-		replicatorProps: replicatorProps{
-			Name:            "test",
-			allowAll:        allowAll,
-
-			targetsFrom:     make(map[string][]string),
-			targetsTo:       make(map[string][]string),
-
-			watchedTargets:  make(map[string][]string),
-			watchedPatterns: make(map[string][]targetPattern),
-
-			objectStore:     cache.NewStore(testKey),
-			namespaceStore:  cache.NewStore(namespaceKey),
-		},
-		replicatorActions: &testActions{
-			T: t,
+func createTestReplicator(t *testing.T, allowAll bool, ignoreUnknown bool, namespaces ...string) *ObjectReplicator {
+	objectStore := cache.NewStore(testKey)
+	namespaceStore := cache.NewStore(namespaceKey)
+	replicator := &ObjectReplicator{
+		ReplicatorProps: NewReplicatorProps(nil, "test", ReplicatorOptions{
+			AllowAll:      allowAll,
+			IgnoreUnknown: ignoreUnknown,
+		}),
+		ReplicatorActions: &testActions{
+			T:     t,
+			Store: objectStore,
 		},
 	}
+	replicator.objectStore = objectStore
+	replicator.namespaceStore = namespaceStore
 	if len(namespaces) > 0 {
 		objects := []interface{}{}
-		for _, ns := range(namespaces) {
+		for _, ns := range namespaces {
 			objects = append(objects, &v1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: ns,
@@ -209,44 +204,44 @@ func createTestReplicator(t *testing.T, allowAll bool, namespaces ...string) *ob
 	return replicator
 }
 
-func addNamespace(r *objectReplicator, namespace string) *v1.Namespace {
+func addNamespace(r *ObjectReplicator, namespace string) *v1.Namespace {
 	object := &v1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: namespace,
 		},
 	}
-	require.NoError(r.replicatorActions.(*testActions).T, r.namespaceStore.Update(object))
+	require.NoError(r.ReplicatorActions.(*testActions).T, r.namespaceStore.Update(object))
 	return object
 }
 
-func deleteNamespace(r *objectReplicator, namespace string) *v1.Namespace {
+func deleteNamespace(r *ObjectReplicator, namespace string) *v1.Namespace {
 	object := &v1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: namespace,
 		},
 	}
-	require.NoError(r.replicatorActions.(*testActions).T, r.namespaceStore.Delete(object))
+	require.NoError(r.ReplicatorActions.(*testActions).T, r.namespaceStore.Delete(object))
 	return object
 }
 
-func getObject(r *objectReplicator, namespace string, name string) *testObject {
+func getObject(r *ObjectReplicator, namespace string, name string) *testObject {
 	object, ok, err := r.objectStore.GetByKey(fmt.Sprintf("%s/%s", namespace, name))
-	require.NoError(r.replicatorActions.(*testActions).T, err)
+	require.NoError(r.ReplicatorActions.(*testActions).T, err)
 	if !ok {
 		return nil
 	}
 	return object.(*testObject)
 }
 
-func updateObject(r *objectReplicator, namespace string, name string, annotations map[string]string) *testObject {
+func updateObject(r *ObjectReplicator, namespace string, name string, annotations map[string]string) *testObject {
 	if annotations == nil {
 		annotations = getObject(r, namespace, name).Meta.Annotations
 	}
 	copy := map[string]string{}
-	for k, v := range(annotations) {
+	for k, v := range annotations {
 		copy[k] = v
 	}
-	actions := r.replicatorActions.(*testActions)
+	actions := r.ReplicatorActions.(*testActions)
 	object := &testObject{
 		Type: strconv.Itoa(actions.Incr),
 		Data: strconv.Itoa(actions.Incr),
@@ -258,20 +253,20 @@ func updateObject(r *objectReplicator, namespace string, name string, annotation
 		},
 	}
 	actions.Incr ++
-	require.NoError(r.replicatorActions.(*testActions).T, r.objectStore.Update(object))
+	require.NoError(r.ReplicatorActions.(*testActions).T, r.objectStore.Update(object))
 	return object
 }
 
-func deleteObject(r *objectReplicator, namespace string, name string) *testObject {
+func deleteObject(r *ObjectReplicator, namespace string, name string) *testObject {
 	object := getObject(r, namespace, name)
-	require.NoError(r.replicatorActions.(*testActions).T, r.objectStore.Delete(object))
+	require.NoError(r.ReplicatorActions.(*testActions).T, r.objectStore.Delete(object))
 	return object
 }
 
-func assertAction(t *testing.T, r *objectReplicator, index int, action *testAction) {
-	actions := r.replicatorActions.(*testActions).Actions
+func assertAction(t *testing.T, r *ObjectReplicator, index int, action *testAction) {
+	actions := r.ReplicatorActions.(*testActions).Actions
 	prefix := fmt.Sprintf("[%d].", index)
-	if assert.True(t, len(actions) > index, fmt.Sprintf("len(actions) > %d", index)) &&
+	if assert.Truef(t, len(actions) > index, "len(actions) > %d", index) &&
 			assert.Equal(t, action.Action, actions[index].Action, prefix + "Action") &&
 			assert.Equal(t, action.Object.Meta.Namespace, actions[index].Object.Meta.Namespace, prefix + "Object.Meta.Namespace") &&
 			assert.Equal(t, action.Object.Meta.Name, actions[index].Object.Meta.Name, prefix + "Object.Meta.Name") {
@@ -280,26 +275,42 @@ func assertAction(t *testing.T, r *objectReplicator, index int, action *testActi
 		assert.Equal(t, action.Object.Data, actions[index].Object.Data, prefix + "Object.Data")
 		assert.Equal(t, action.Object.Meta.ResourceVersion, actions[index].Object.Meta.ResourceVersion, prefix + "Object.Meta.ResourceVersion")
 		testAnnotations := actions[index].Object.Meta.Annotations
-		for k, v := range(action.Object.Meta.Annotations) {
-			assert.Equal(t, v, testAnnotations[k], fmt.Sprintf("[%v]Object.Meta.Annotations[\"%v\"]", index, k))
+		for k, v := range action.Object.Meta.Annotations {
+			assert.Equalf(t, v, testAnnotations[k], "[%v]Object.Meta.Annotations[\"%v\"]", index, k)
 		}
 	}
 }
 
-func requireActionsLength(t *testing.T, r *objectReplicator, length int) {
-	actions := r.replicatorActions.(*testActions).Actions
+func assertStore(t *testing.T, r *ObjectReplicator, namespace string, name string, resourceVersion string) {
+	object, exists, err := r.objectStore.GetByKey(fmt.Sprintf("%s/%s", namespace, name))
+	if assert.NoError(t, err) {
+		if resourceVersion == "" {
+			assert.Falsef(t, exists, "%s/%s should not exists", namespace, name)
+		} else if assert.Truef(t, exists, "%s/%s should exists", namespace, name) {
+			if test, ok := object.(*testObject); assert.True(t, ok) {
+				assert.Equalf(t, resourceVersion, test.Meta.ResourceVersion,
+					"%s/%s ResourceVersion", namespace, name)
+			}
+		}
+	}
+}
+
+func requireActionsLength(t *testing.T, r *ObjectReplicator, length int) {
+	actions := r.ReplicatorActions.(*testActions).Actions
 	require.Equal(t, length, len(actions), "len(actions)")
 }
 
 func TestReplicateFrom_simple(t *testing.T) {
-	r := createTestReplicator(t, false)
+	r := createTestReplicator(t, false, true)
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicationAllowedAnnotation: "true",
+		annotationsPrefix + "unknown": "...",
 	})
 	r.ObjectAdded(source)
 	requireActionsLength(t, r, 0)
 	target := updateObject(r, "target-ns", "target", M{
 		ReplicateFromAnnotation: "source-ns/source",
+		annotationsPrefix + "unknown": "...",
 	})
 
 	r.ObjectAdded(target)
@@ -318,6 +329,7 @@ func TestReplicateFrom_simple(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "2")
 	requireActionsLength(t, r, 1)
 
 	r.ObjectAdded(getObject(r, "target-ns", "target"))
@@ -340,6 +352,7 @@ func TestReplicateFrom_simple(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "4")
 	requireActionsLength(t, r, 2)
 
 	source = deleteObject(r, "source-ns", "source")
@@ -359,10 +372,12 @@ func TestReplicateFrom_simple(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "5")
 	requireActionsLength(t, r, 3)
 
 	source = updateObject(r, "source-ns", "source", M{
 		ReplicationAllowedAnnotation: "true",
+		annotationsPrefix + "unknown": "...",
 	})
 	r.ObjectAdded(source)
 	assertAction(t, r, 3, &testAction{
@@ -380,11 +395,44 @@ func TestReplicateFrom_simple(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "7")
 	requireActionsLength(t, r, 4)
+
+	target = updateObject(r, "target-ns", "target", M{
+		ReplicateFromAnnotation: "source-ns/source",
+		annotationsPrefix + "unknown": "...",
+		ReplicatedFromVersionAnnotation: "6",
+	})
+	r.ObjectAdded(target)
+	requireActionsLength(t, r, 4)
+
+	target = updateObject(r, "target-ns", "target", M{
+		ReplicateFromAnnotation: "source-ns/source",
+		annotationsPrefix + "unknown": "...",
+		ReplicatedFromVersionAnnotation: "...",
+	})
+	r.ObjectAdded(target)
+	assertAction(t, r, 4, &testAction{
+		Action: "update",
+		Object: testObject{
+			Type: "9",
+			Data: "6",
+			Meta: metav1.ObjectMeta{
+				Name: "target",
+				Namespace: "target-ns",
+				ResourceVersion: "9",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "6",
+				},
+			},
+		},
+	})
+	assertStore(t, r, "target-ns", "target", "10")
+	requireActionsLength(t, r, 5)
 }
 
 func TestReplicateFrom_allowed(t *testing.T) {
-	r := createTestReplicator(t, false)
+	r := createTestReplicator(t, false, false)
 	source := updateObject(r, "source-ns", "source", M{})
 	target := updateObject(r, "target-ns", "target", M{
 		ReplicateFromAnnotation: "source-ns/source",
@@ -411,6 +459,7 @@ func TestReplicateFrom_allowed(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "3")
 	requireActionsLength(t, r, 1)
 
 	source = updateObject(r, "source-ns", "source", M{
@@ -432,6 +481,7 @@ func TestReplicateFrom_allowed(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "5")
 	requireActionsLength(t, r, 2)
 
 	source = updateObject(r, "source-ns", "source", M{
@@ -453,6 +503,7 @@ func TestReplicateFrom_allowed(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "7")
 	requireActionsLength(t, r, 3)
 
 	source = updateObject(r, "source-ns", "source", M{
@@ -474,6 +525,7 @@ func TestReplicateFrom_allowed(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "9")
 	requireActionsLength(t, r, 4)
 
 	source = deleteObject(r, "source-ns", "source")
@@ -482,7 +534,7 @@ func TestReplicateFrom_allowed(t *testing.T) {
 }
 
 func TestReplicateFrom_onceSsource(t *testing.T) {
-	r := createTestReplicator(t, true)
+	r := createTestReplicator(t, true, false)
 	target := updateObject(r, "target-ns", "target", M{
 		ReplicateFromAnnotation: "source-ns/source",
 	})
@@ -507,6 +559,7 @@ func TestReplicateFrom_onceSsource(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "2")
 	requireActionsLength(t, r, 1)
 
 	source = updateObject(r, "source-ns", "source", M{
@@ -536,6 +589,7 @@ func TestReplicateFrom_onceSsource(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "5")
 	requireActionsLength(t, r, 2)
 
 	source = updateObject(r, "source-ns", "source", M{
@@ -565,11 +619,12 @@ func TestReplicateFrom_onceSsource(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "8")
 	requireActionsLength(t, r, 3)
 }
 
 func TestReplicateFrom_onceTtarget(t *testing.T) {
-	r := createTestReplicator(t, true)
+	r := createTestReplicator(t, true, false)
 	source := updateObject(r, "source-ns", "source", M{})
 	r.ObjectAdded(source)
 	target := updateObject(r, "target-ns", "target", M{
@@ -595,6 +650,7 @@ func TestReplicateFrom_onceTtarget(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "2")
 	requireActionsLength(t, r, 1)
 
 	source = updateObject(r, "source-ns", "source", M{})
@@ -622,6 +678,7 @@ func TestReplicateFrom_onceTtarget(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "5")
 	requireActionsLength(t, r, 2)
 	source = updateObject(r, "source-ns", "source", M{
 		ReplicateOnceVersionAnnotation: "other",
@@ -645,11 +702,12 @@ func TestReplicateFrom_onceTtarget(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "7")
 	requireActionsLength(t, r, 3)
 }
 
 func TestReplicateFrom_invalid(t *testing.T) {
-	r := createTestReplicator(t, false)
+	r := createTestReplicator(t, false, false)
 	target := updateObject(r, "target-ns", "target", M{
 		ReplicateFromAnnotation: "source-ns/source",
 	})
@@ -675,6 +733,7 @@ func TestReplicateFrom_invalid(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "2")
 	requireActionsLength(t, r, 1)
 
 	source = updateObject(r, "source-ns", "source", M{
@@ -690,6 +749,13 @@ func TestReplicateFrom_invalid(t *testing.T) {
 	requireActionsLength(t, r, 1)
 	source = updateObject(r, "source-ns", "source", M{
 		ReplicationAllowedAnnotation: "true",
+		annotationsPrefix + "other": "true",
+
+	})
+	r.ObjectAdded(source)
+	requireActionsLength(t, r, 1)
+	source = updateObject(r, "source-ns", "source", M{
+		ReplicationAllowedAnnotation: "true",
 	})
 
 	r.ObjectAdded(source)
@@ -697,24 +763,26 @@ func TestReplicateFrom_invalid(t *testing.T) {
 		Action: "update",
 		Object: testObject{
 			Type: "0",
-			Data: "5",
+			Data: "6",
 			Meta: metav1.ObjectMeta{
 				Name: "target",
 				Namespace: "target-ns",
 				ResourceVersion: "2",
 				Annotations: M{
-					ReplicatedFromVersionAnnotation: "5",
+					ReplicatedFromVersionAnnotation: "6",
 				},
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "7")
 	requireActionsLength(t, r, 2)
 }
 
 func TestReplicateTo_name(t *testing.T) {
-	r := createTestReplicator(t, false, "my-ns")
+	r := createTestReplicator(t, false, true, "my-ns")
 	source := updateObject(r, "my-ns", "source", M{
 		ReplicateToAnnotation: "target",
+		annotationsPrefix + "new": "...",
 	})
 	r.ObjectAdded(source)
 	assertAction(t, r, 0, &testAction{
@@ -733,10 +801,12 @@ func TestReplicateTo_name(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "my-ns", "target", "1")
 	requireActionsLength(t, r, 1)
 
 	source = updateObject(r, "my-ns", "source", M{
 		ReplicateToAnnotation: "target",
+		annotationsPrefix + "new": "...",
 	})
 	r.ObjectAdded(source)
 	assertAction(t, r, 1, &testAction{
@@ -755,6 +825,9 @@ func TestReplicateTo_name(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "my-ns", "target", "3")
+	requireActionsLength(t, r, 2)
+	r.ObjectAdded(getObject(r, "my-ns", "target"))
 	requireActionsLength(t, r, 2)
 	r.ObjectAdded(source)
 	requireActionsLength(t, r, 2)
@@ -766,7 +839,7 @@ func TestReplicateTo_name(t *testing.T) {
 	requireActionsLength(t, r, 4)
 	deleteIndex := 2
 	installIndex := 3
-	if r.replicatorActions.(*testActions).Actions[2].Action == "install" {
+	if r.ReplicatorActions.(*testActions).Actions[2].Action == "install" {
 		installIndex = 2
 		deleteIndex = 3
 	}
@@ -780,6 +853,7 @@ func TestReplicateTo_name(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "my-ns", "target", "")
 	assertAction(t, r, installIndex, &testAction{
 		Action: "install",
 		Object: testObject{
@@ -796,24 +870,59 @@ func TestReplicateTo_name(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "my-ns", "other", "5")
+
+	other := updateObject(r, "my-ns", "other", M{
+		ReplicatedFromVersionAnnotation: "4",
+		ReplicatedByAnnotation: "my-ns/source",
+		annotationsPrefix + "new": "...",
+	})
+	r.ObjectAdded(other)
+	requireActionsLength(t, r, 4)
+
+	other = updateObject(r, "my-ns", "other", M{
+		ReplicatedFromVersionAnnotation: "other",
+		ReplicatedByAnnotation: "my-ns/source",
+		annotationsPrefix + "new": "...",
+	})
+	r.ObjectAdded(other)
+	assertAction(t, r, 4, &testAction{
+		Action: "install",
+		Object: testObject{
+			Type: "4",
+			Data: "4",
+			Meta: metav1.ObjectMeta{
+				Name: "other",
+				Namespace: "my-ns",
+				ResourceVersion: "7",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "4",
+					ReplicatedByAnnotation: "my-ns/source",
+				},
+			},
+		},
+	})
+	assertStore(t, r, "my-ns", "other", "8")
+	requireActionsLength(t, r, 5)
 
 	source = deleteObject(r, "my-ns", "source")
 	r.ObjectDeleted(source)
-	assertAction(t, r, 4, &testAction{
+	assertAction(t, r, 5, &testAction{
 		Action: "delete",
 		Object: testObject{
 			Meta: metav1.ObjectMeta{
 				Name: "other",
 				Namespace: "my-ns",
-				ResourceVersion: "5",
+				ResourceVersion: "8",
 			},
 		},
 	})
-	requireActionsLength(t, r, 5)
+	assertStore(t, r, "my-ns", "other", "")
+	requireActionsLength(t, r, 6)
 }
 
 func TestReplicateTo_namespaces(t *testing.T) {
-	r := createTestReplicator(t, false, "target-1", "target-2")
+	r := createTestReplicator(t, false, false, "target-1", "target-2")
 	source := updateObject(r, "source-ns", "my-test", M{
 		ReplicateToNsAnnotation: "target-[1-3]",
 	})
@@ -851,7 +960,7 @@ func TestReplicateTo_namespaces(t *testing.T) {
 			},
 		},
 	}
-	actions := r.replicatorActions.(*testActions).Actions
+	actions := r.ReplicatorActions.(*testActions).Actions
 	resourcesID := 1
 	resources := map[string]string{}
 	for i:=0; i<2; i++ {
@@ -860,7 +969,7 @@ func TestReplicateTo_namespaces(t *testing.T) {
 		}
 		ns := actions[i].Object.Meta.Namespace
 		if _, ok := expected[ns]; !ok {
-			for n := range(expected) {
+			for n := range expected {
 				ns = n
 				break
 			}
@@ -869,7 +978,10 @@ func TestReplicateTo_namespaces(t *testing.T) {
 		delete(expected, ns)
 		if actions[i].Action != "delete" {
 			resources[ns] = strconv.Itoa(resourcesID)
+			assertStore(t, r, ns, "my-test", strconv.Itoa(resourcesID))
 			resourcesID ++
+		} else {
+			assertStore(t, r, ns, "my-test", "")
 		}
 	}
 	requireActionsLength(t, r, 2)
@@ -890,6 +1002,7 @@ func TestReplicateTo_namespaces(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-3", "my-test", "3")
 	requireActionsLength(t, r, 3)
 	r.NamespaceAdded(addNamespace(r, "target-3"))
 	r.NamespaceAdded(addNamespace(r, "target-4"))
@@ -957,7 +1070,7 @@ func TestReplicateTo_namespaces(t *testing.T) {
 			},
 		},
 	}
-	actions = r.replicatorActions.(*testActions).Actions
+	actions = r.ReplicatorActions.(*testActions).Actions
 	resourcesID = 5
 	resources = map[string]string{}
 	for i:=3; i<3+4; i++ {
@@ -966,7 +1079,7 @@ func TestReplicateTo_namespaces(t *testing.T) {
 		}
 		ns := actions[i].Object.Meta.Namespace
 		if _, ok := expected[ns]; !ok {
-			for n := range(expected) {
+			for n := range expected {
 				ns = n
 				break
 			}
@@ -975,7 +1088,10 @@ func TestReplicateTo_namespaces(t *testing.T) {
 		delete(expected, ns)
 		if actions[i].Action != "delete" {
 			resources[ns] = strconv.Itoa(resourcesID)
+			assertStore(t, r, ns, "my-test", strconv.Itoa(resourcesID))
 			resourcesID++
+		} else {
+			assertStore(t, r, ns, "my-test", "")
 		}
 	}
 	requireActionsLength(t, r, 7)
@@ -1027,7 +1143,7 @@ func TestReplicateTo_namespaces(t *testing.T) {
 			},
 		},
 	}
-	actions = r.replicatorActions.(*testActions).Actions
+	actions = r.ReplicatorActions.(*testActions).Actions
 	resourcesID = 9
 	resources = map[string]string{}
 	for i:=7; i<7+3; i++ {
@@ -1036,7 +1152,7 @@ func TestReplicateTo_namespaces(t *testing.T) {
 		}
 		ns := actions[i].Object.Meta.Namespace
 		if _, ok := expected[ns]; !ok {
-			for n := range(expected) {
+			for n := range expected {
 				ns = n
 				break
 			}
@@ -1045,7 +1161,10 @@ func TestReplicateTo_namespaces(t *testing.T) {
 		delete(expected, ns)
 		if actions[i].Action != "delete" {
 			resources[ns] = strconv.Itoa(resourcesID)
+			assertStore(t, r, ns, "my-test", strconv.Itoa(resourcesID))
 			resourcesID++
+		} else {
+			assertStore(t, r, ns, "my-test", "")
 		}
 	}
 	requireActionsLength(t, r, 10)
@@ -1075,19 +1194,20 @@ func TestReplicateTo_namespaces(t *testing.T) {
 			},
 		},
 	}
-	actions = r.replicatorActions.(*testActions).Actions
+	actions = r.ReplicatorActions.(*testActions).Actions
 	for i:=10; i<10+2; i++ {
 		if len(actions) <= i {
 			continue
 		}
 		ns := actions[i].Object.Meta.Namespace
 		if _, ok := expected[ns]; !ok {
-			for n := range(expected) {
+			for n := range expected {
 				ns = n
 				break
 			}
 		}
 		assertAction(t, r, i, expected[ns])
+		assertStore(t, r, ns, "my-test", "")
 		delete(expected, ns)
 	}
 	requireActionsLength(t, r, 12)
@@ -1096,7 +1216,7 @@ func TestReplicateTo_namespaces(t *testing.T) {
 }
 
 func TestReplicateTo_once(t *testing.T) {
-	r := createTestReplicator(t, false, "target-1")
+	r := createTestReplicator(t, false, false, "target-1")
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-[0-9]+/target",
 		ReplicateOnceAnnotation: "true",
@@ -1118,6 +1238,7 @@ func TestReplicateTo_once(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-1", "target", "1")
 	requireActionsLength(t, r, 1)
 
 	source = updateObject(r, "source-ns", "source", M{
@@ -1146,6 +1267,7 @@ func TestReplicateTo_once(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-2", "target", "3")
 	requireActionsLength(t, r, 2)
 
 	source = updateObject(r, "source-ns", "source", M{
@@ -1158,7 +1280,7 @@ func TestReplicateTo_once(t *testing.T) {
 	requireActionsLength(t, r, 4)
 	index1 := 2
 	index2 := 3
-	if r.replicatorActions.(*testActions).Actions[2].Object.Meta.Namespace == "target-2" {
+	if r.ReplicatorActions.(*testActions).Actions[2].Object.Meta.Namespace == "target-2" {
 		index2 = 2
 		index1 = 3
 	}
@@ -1178,6 +1300,7 @@ func TestReplicateTo_once(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-1", "target", strconv.Itoa(index1 + 3))
 	assertAction(t, r, index2, &testAction{
 		Action: "install",
 		Object: testObject{
@@ -1194,6 +1317,7 @@ func TestReplicateTo_once(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-2", "target", strconv.Itoa(index2 + 3))
 
 	source = deleteObject(r, "source-ns", "source")
 	r.ObjectDeleted(source)
@@ -1201,7 +1325,7 @@ func TestReplicateTo_once(t *testing.T) {
 	requireActionsLength(t, r, 6)
 	index3 := 4
 	index4 := 5
-	if r.replicatorActions.(*testActions).Actions[4].Object.Meta.Namespace == "target-2" {
+	if r.ReplicatorActions.(*testActions).Actions[4].Object.Meta.Namespace == "target-2" {
 		index4 = 4
 		index3 = 5
 	}
@@ -1215,6 +1339,7 @@ func TestReplicateTo_once(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-1", "target", "")
 	assertAction(t, r, index4, &testAction{
 		Action: "delete",
 		Object: testObject{
@@ -1225,12 +1350,13 @@ func TestReplicateTo_once(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-2", "target", "")
 	r.ObjectDeleted(source)
 	requireActionsLength(t, r, 6)
 }
 
 func TestReplicateTo_annotations(t *testing.T) {
-	r := createTestReplicator(t, false, "target-ns")
+	r := createTestReplicator(t, false, false, "target-ns")
 
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-ns/target",
@@ -1254,6 +1380,7 @@ func TestReplicateTo_annotations(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "1")
 	requireActionsLength(t, r, 1)
 
 	source = updateObject(r, "source-ns", "source", M{
@@ -1278,6 +1405,7 @@ func TestReplicateTo_annotations(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "3")
 	requireActionsLength(t, r, 2)
 	r.ObjectAdded(source)
 	requireActionsLength(t, r, 2)
@@ -1303,11 +1431,12 @@ func TestReplicateTo_annotations(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "5")
 	requireActionsLength(t, r, 3)
 }
 
 func TestReplicateTo_exsists(t *testing.T) {
-	r := createTestReplicator(t, false, "target-1", "target-2")
+	r := createTestReplicator(t, false, false, "target-1", "target-2")
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-[0-9]+/target",
 	})
@@ -1330,6 +1459,7 @@ func TestReplicateTo_exsists(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-2", "target", "2")
 	requireActionsLength(t, r, 1)
 
 	target1 = deleteObject(r, "target-1", "target")
@@ -1349,6 +1479,7 @@ func TestReplicateTo_exsists(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-1", "target", "3")
 	requireActionsLength(t, r, 2)
 
 	target2 := deleteObject(r, "target-2", "target")
@@ -1368,6 +1499,7 @@ func TestReplicateTo_exsists(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-2", "target", "4")
 	requireActionsLength(t, r, 3)
 
 	r.ObjectAdded(getObject(r, "target-2", "target"))
@@ -1375,7 +1507,7 @@ func TestReplicateTo_exsists(t *testing.T) {
 }
 
 func TestReplicateTo_invalid(t *testing.T) {
-	r := createTestReplicator(t, false, "source-ns")
+	r := createTestReplicator(t, false, false, "source-ns")
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-[0-9]+/target",
 	})
@@ -1399,6 +1531,7 @@ func TestReplicateTo_invalid(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-1", "target", "1")
 	requireActionsLength(t, r, 1)
 
 	source = updateObject(r, "source-ns", "source", M{
@@ -1422,28 +1555,36 @@ func TestReplicateTo_invalid(t *testing.T) {
 
 	source = updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-[0-9]+/target",
+		annotationsPrefix + "test": "true",
+	})
+	r.ObjectAdded(source)
+	requireActionsLength(t, r, 1)
+
+	source = updateObject(r, "source-ns", "source", M{
+		ReplicateToAnnotation: "target-[0-9]+/target",
 	})
 	r.ObjectAdded(source)
 	assertAction(t, r, 1, &testAction{
 		Action: "install",
 		Object: testObject{
-			Type: "5",
-			Data: "5",
+			Type: "6",
+			Data: "6",
 			Meta: metav1.ObjectMeta{
 				Name: "target",
 				Namespace: "target-1",
 				ResourceVersion: "1",
 				Annotations: M{
-					ReplicatedFromVersionAnnotation: "5",
+					ReplicatedFromVersionAnnotation: "6",
 				},
 			},
 		},
 	})
+	assertStore(t, r, "target-1", "target", "7")
 	requireActionsLength(t, r, 2)
 }
 
 func TestReplicateToFrom_scenario(t *testing.T) {
-	r := createTestReplicator(t, true, "target-ns")
+	r := createTestReplicator(t, true, false, "target-ns")
 	updateObject(r, "data-ns", "data", M{})
 
 	source := updateObject(r, "source-ns", "source", M{
@@ -1467,6 +1608,7 @@ func TestReplicateToFrom_scenario(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "2")
 	requireActionsLength(t, r, 1)
 
 	r.ObjectAdded(getObject(r, "target-ns", "target"))
@@ -1487,6 +1629,7 @@ func TestReplicateToFrom_scenario(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "3")
 	requireActionsLength(t, r, 2)
 
 	source = updateObject(r, "source-ns", "source", M{
@@ -1509,11 +1652,12 @@ func TestReplicateToFrom_scenario(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "5")
 	requireActionsLength(t, r, 3)
 }
 
 func TestReplicateToFrom_annotations(t *testing.T) {
-	r := createTestReplicator(t, false, "target-ns")
+	r := createTestReplicator(t, false, false, "target-ns")
 
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-ns/target",
@@ -1538,6 +1682,7 @@ func TestReplicateToFrom_annotations(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "1")
 	requireActionsLength(t, r, 1)
 
 	source = updateObject(r, "source-ns", "source", M{
@@ -1563,6 +1708,7 @@ func TestReplicateToFrom_annotations(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "3")
 	requireActionsLength(t, r, 2)
 
 	source = updateObject(r, "source-ns", "source", M{
@@ -1586,5 +1732,6 @@ func TestReplicateToFrom_annotations(t *testing.T) {
 			},
 		},
 	})
+	assertStore(t, r, "target-ns", "target", "5")
 	requireActionsLength(t, r, 3)
 }
