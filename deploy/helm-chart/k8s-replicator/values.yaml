@@ -9,9 +9,12 @@ image:
 
 nameOverride: ""
 fullnameOverride: ""
-prefixOverride: ""
+annotationsPrefix: "k8s-replicator"
 allowAll: false
 ignoreUnknown: false
+resyncPeriod: "30m"
+runReplicators: all
+createWithLabels: ""
 
 resources:
   limits:

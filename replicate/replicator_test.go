@@ -175,14 +175,11 @@ func namespaceKey(object interface{}) (string, error) {
 	return object.(*v1.Namespace).Name, nil
 }
 
-func createTestReplicator(t *testing.T, allowAll bool, ignoreUnknown bool, namespaces ...string) *ObjectReplicator {
+func createTestReplicator(t *testing.T, options ReplicatorOptions, namespaces ...string) *ObjectReplicator {
 	objectStore := cache.NewStore(testKey)
 	namespaceStore := cache.NewStore(namespaceKey)
 	replicator := &ObjectReplicator{
-		ReplicatorProps: NewReplicatorProps(nil, "test", ReplicatorOptions{
-			AllowAll:      allowAll,
-			IgnoreUnknown: ignoreUnknown,
-		}),
+		ReplicatorProps: NewReplicatorProps(nil, "test", options),
 		ReplicatorActions: &testActions{
 			T:     t,
 			Store: objectStore,
@@ -278,6 +275,10 @@ func assertAction(t *testing.T, r *ObjectReplicator, index int, action *testActi
 		for k, v := range action.Object.Meta.Annotations {
 			assert.Equalf(t, v, testAnnotations[k], "[%v]Object.Meta.Annotations[\"%v\"]", index, k)
 		}
+		testLabels := actions[index].Object.Meta.Labels
+		for k, v := range action.Object.Meta.Labels {
+			assert.Equalf(t, v, testLabels[k], "[%v]Object.Meta.Labels[\"%v\"]", index, k)
+		}
 	}
 }
 
@@ -301,7 +302,7 @@ func requireActionsLength(t *testing.T, r *ObjectReplicator, length int) {
 }
 
 func TestReplicateFrom_simple(t *testing.T) {
-	r := createTestReplicator(t, false, true)
+	r := createTestReplicator(t, ReplicatorOptions{IgnoreUnknown: true})
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicationAllowedAnnotation: "true",
 		annotationsPrefix + "unknown": "...",
@@ -432,7 +433,7 @@ func TestReplicateFrom_simple(t *testing.T) {
 }
 
 func TestReplicateFrom_allowed(t *testing.T) {
-	r := createTestReplicator(t, false, false)
+	r := createTestReplicator(t, ReplicatorOptions{})
 	source := updateObject(r, "source-ns", "source", M{})
 	target := updateObject(r, "target-ns", "target", M{
 		ReplicateFromAnnotation: "source-ns/source",
@@ -534,7 +535,7 @@ func TestReplicateFrom_allowed(t *testing.T) {
 }
 
 func TestReplicateFrom_onceSsource(t *testing.T) {
-	r := createTestReplicator(t, true, false)
+	r := createTestReplicator(t, ReplicatorOptions{AllowAll: true})
 	target := updateObject(r, "target-ns", "target", M{
 		ReplicateFromAnnotation: "source-ns/source",
 	})
@@ -624,7 +625,7 @@ func TestReplicateFrom_onceSsource(t *testing.T) {
 }
 
 func TestReplicateFrom_onceTtarget(t *testing.T) {
-	r := createTestReplicator(t, true, false)
+	r := createTestReplicator(t, ReplicatorOptions{AllowAll: true})
 	source := updateObject(r, "source-ns", "source", M{})
 	r.ObjectAdded(source)
 	target := updateObject(r, "target-ns", "target", M{
@@ -707,7 +708,7 @@ func TestReplicateFrom_onceTtarget(t *testing.T) {
 }
 
 func TestReplicateFrom_invalid(t *testing.T) {
-	r := createTestReplicator(t, false, false)
+	r := createTestReplicator(t, ReplicatorOptions{})
 	target := updateObject(r, "target-ns", "target", M{
 		ReplicateFromAnnotation: "source-ns/source",
 	})
@@ -779,7 +780,13 @@ func TestReplicateFrom_invalid(t *testing.T) {
 }
 
 func TestReplicateTo_name(t *testing.T) {
-	r := createTestReplicator(t, false, true, "my-ns")
+	r := createTestReplicator(t, ReplicatorOptions{
+			IgnoreUnknown: true,
+			Labels: M{
+				"label1": "value1",
+				"label2": "value2",
+			},
+		}, "my-ns")
 	source := updateObject(r, "my-ns", "source", M{
 		ReplicateToAnnotation: "target",
 		annotationsPrefix + "new": "...",
@@ -794,6 +801,10 @@ func TestReplicateTo_name(t *testing.T) {
 				Name: "target",
 				Namespace: "my-ns",
 				ResourceVersion: "",
+				Labels: M{
+					"label1": "value1",
+					"label2": "value2",
+				},
 				Annotations: M{
 					ReplicatedFromVersionAnnotation: "0",
 					ReplicatedByAnnotation: "my-ns/source",
@@ -818,6 +829,10 @@ func TestReplicateTo_name(t *testing.T) {
 				Name: "target",
 				Namespace: "my-ns",
 				ResourceVersion: "1",
+				Labels: M{
+					"label1": "value1",
+					"label2": "value2",
+				},
 				Annotations: M{
 					ReplicatedFromVersionAnnotation: "2",
 					ReplicatedByAnnotation: "my-ns/source",
@@ -863,6 +878,10 @@ func TestReplicateTo_name(t *testing.T) {
 				Name: "other",
 				Namespace: "my-ns",
 				ResourceVersion: "",
+				Labels: M{
+					"label1": "value1",
+					"label2": "value2",
+				},
 				Annotations: M{
 					ReplicatedFromVersionAnnotation: "4",
 					ReplicatedByAnnotation: "my-ns/source",
@@ -895,6 +914,10 @@ func TestReplicateTo_name(t *testing.T) {
 				Name: "other",
 				Namespace: "my-ns",
 				ResourceVersion: "7",
+				Labels: M{
+					"label1": "value1",
+					"label2": "value2",
+				},
 				Annotations: M{
 					ReplicatedFromVersionAnnotation: "4",
 					ReplicatedByAnnotation: "my-ns/source",
@@ -922,7 +945,7 @@ func TestReplicateTo_name(t *testing.T) {
 }
 
 func TestReplicateTo_namespaces(t *testing.T) {
-	r := createTestReplicator(t, false, false, "target-1", "target-2")
+	r := createTestReplicator(t, ReplicatorOptions{}, "target-1", "target-2")
 	source := updateObject(r, "source-ns", "my-test", M{
 		ReplicateToNsAnnotation: "target-[1-3]",
 	})
@@ -1216,7 +1239,7 @@ func TestReplicateTo_namespaces(t *testing.T) {
 }
 
 func TestReplicateTo_once(t *testing.T) {
-	r := createTestReplicator(t, false, false, "target-1")
+	r := createTestReplicator(t, ReplicatorOptions{}, "target-1")
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-[0-9]+/target",
 		ReplicateOnceAnnotation: "true",
@@ -1356,7 +1379,7 @@ func TestReplicateTo_once(t *testing.T) {
 }
 
 func TestReplicateTo_annotations(t *testing.T) {
-	r := createTestReplicator(t, false, false, "target-ns")
+	r := createTestReplicator(t, ReplicatorOptions{}, "target-ns")
 
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-ns/target",
@@ -1436,7 +1459,7 @@ func TestReplicateTo_annotations(t *testing.T) {
 }
 
 func TestReplicateTo_exsists(t *testing.T) {
-	r := createTestReplicator(t, false, false, "target-1", "target-2")
+	r := createTestReplicator(t, ReplicatorOptions{}, "target-1", "target-2")
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-[0-9]+/target",
 	})
@@ -1507,7 +1530,7 @@ func TestReplicateTo_exsists(t *testing.T) {
 }
 
 func TestReplicateTo_invalid(t *testing.T) {
-	r := createTestReplicator(t, false, false, "source-ns")
+	r := createTestReplicator(t, ReplicatorOptions{}, "source-ns")
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-[0-9]+/target",
 	})
@@ -1584,7 +1607,13 @@ func TestReplicateTo_invalid(t *testing.T) {
 }
 
 func TestReplicateToFrom_scenario(t *testing.T) {
-	r := createTestReplicator(t, true, false, "target-ns")
+	r := createTestReplicator(t, ReplicatorOptions{
+		AllowAll: true,
+		Labels: M{
+			"labela": "valuea",
+			"labelb": "valueb",
+		},
+	}, "target-ns")
 	updateObject(r, "data-ns", "data", M{})
 
 	source := updateObject(r, "source-ns", "source", M{
@@ -1601,6 +1630,10 @@ func TestReplicateToFrom_scenario(t *testing.T) {
 				Name: "target",
 				Namespace: "target-ns",
 				ResourceVersion: "",
+				Labels: M{
+					"labela": "valuea",
+					"labelb": "valueb",
+				},
 				Annotations: M{
 					ReplicatedByAnnotation: "source-ns/source",
 					ReplicateFromAnnotation: "data-ns/data",
@@ -1621,6 +1654,10 @@ func TestReplicateToFrom_scenario(t *testing.T) {
 				Name: "target",
 				Namespace: "target-ns",
 				ResourceVersion: "2",
+				Labels: M{
+					"labela": "valuea",
+					"labelb": "valueb",
+				},
 				Annotations: M{
 					ReplicatedByAnnotation: "source-ns/source",
 					ReplicateFromAnnotation: "data-ns/data",
@@ -1645,6 +1682,10 @@ func TestReplicateToFrom_scenario(t *testing.T) {
 				Name: "target",
 				Namespace: "target-ns",
 				ResourceVersion: "3",
+				Labels: M{
+					"labela": "valuea",
+					"labelb": "valueb",
+				},
 				Annotations: M{
 					ReplicatedByAnnotation: "source-ns/source",
 					ReplicatedFromVersionAnnotation: "4",
@@ -1657,7 +1698,7 @@ func TestReplicateToFrom_scenario(t *testing.T) {
 }
 
 func TestReplicateToFrom_annotations(t *testing.T) {
-	r := createTestReplicator(t, false, false, "target-ns")
+	r := createTestReplicator(t, ReplicatorOptions{}, "target-ns")
 
 	source := updateObject(r, "source-ns", "source", M{
 		ReplicateToAnnotation: "target-ns/target",

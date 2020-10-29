@@ -31,5 +31,5 @@ Create chart name and version as used by the chart label.
 {{- end -}}
 
 {{- define "k8s-replicator.prefix" -}}
-  {{- coalesce .Values.prefixOverride .Values.fullnameOverride .Values.nameOverride .Chart.Name | trimSuffix "/" | trunc 253 | trimSuffix "-" | trimSuffix "." -}}/
+  {{- coalesce .Values.annotationsPrefix .Values.fullnameOverride .Values.nameOverride .Chart.Name | trimSuffix "/" | trunc 253 | trimSuffix "-" | trimSuffix "." -}}/
 {{- end -}}

@@ -2,8 +2,10 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/olli-ai/kubernetes-replicator/liveness"
@@ -17,27 +19,50 @@ var f flags
 
 func init() {
 	var err error
-	flag.StringVar(&f.AnnotationsPrefix, "prefix", "v1.kubernetes-replicator.olli.com/", "prefix for all annotations")
-	flag.StringVar(&f.Kubeconfig, "kubeconfig", "", "path to Kubernetes config file")
+	flag.StringVar(&f.AnnotationsPrefix, "annotations-prefix", "v1.kubernetes-replicator.olli.com/", "prefix for all annotations")
+	flag.StringVar(&f.KubeConfig, "kube-config", "", "path to Kubernetes config file")
 	flag.StringVar(&f.ResyncPeriodS, "resync-period", "30m", "resynchronization period")
-	flag.StringVar(&f.StatusAddr, "status-addr", ":9102", "listen address for status and monitoring server")
+	flag.StringVar(&f.ReplicatorsS, "run-replicators", "all", "replicators to run")
+	flag.StringVar(&f.LabelsS, "create-with-labels", "", "labels to add to created resources")
+	flag.StringVar(&f.StatusAddress, "status-address", ":9102", "listen address for status and monitoring server")
 	flag.BoolVar(&f.AllowAll, "allow-all", false, "allow replication of all secrets by default (CAUTION: only use when you know what you're doing)")
 	flag.BoolVar(&f.IgnoreUnknown, "ignore-unknown", true, "unkown annotations with the same prefix do not raise an error")
 	flag.Parse()
 
 	replicate.PrefixAnnotations(f.AnnotationsPrefix)
 
-	f.ResyncPeriod, err = time.ParseDuration(f.ResyncPeriodS)
-	if err != nil {
-		panic(err)
+	if f.ResyncPeriod, err = time.ParseDuration(f.ResyncPeriodS); err != nil {
+		panic(fmt.Errorf("invalid --resync-period \"%s\": %s", f.ResyncPeriodS, err))
+	}
+
+	for _, replicator := range strings.Split(f.ReplicatorsS, ",") {
+		if replicator = strings.Trim(replicator, " "); replicator != "" {
+			f.Replicators = append(f.Replicators, strings.ToLower(replicator))
+		}
+	}
+
+	f.Labels = map[string]string{}
+	for _, labelValue := range strings.Split(f.LabelsS, ",") {
+		labelValue = strings.Trim(labelValue, " ")
+		if labelValue == "" {
+			continue
+		} else if parts := strings.Split(labelValue, "="); len(parts) != 2 {
+		} else if label := strings.Trim(parts[0], " "); label == "" {
+		} else if value := strings.Trim(parts[1], " "); value == "" {
+		} else {
+			f.Labels[label] = value
+			continue
+		}
+		panic(fmt.Errorf("invalid --labels \"%s\": format label=value expected", labelValue))
 	}
 }
 
 type newReplicatorFunc func(kubernetes.Interface, replicate.ReplicatorOptions, time.Duration) replicate.Replicator
 
-var newReplicatorFuncs []newReplicatorFunc = []newReplicatorFunc{
-	replicate.NewConfigMapReplicator,
-	replicate.NewSecretReplicator,
+// All the new replicator function, key must be lower case
+var newReplicatorFuncs map[string]newReplicatorFunc = map[string]newReplicatorFunc{
+	"configmap": replicate.NewConfigMapReplicator,
+	"secret": replicate.NewSecretReplicator,
 }
 
 func main() {
@@ -45,14 +70,13 @@ func main() {
 	var err error
 	var client kubernetes.Interface
 
-	if f.Kubeconfig == "" {
+	if f.KubeConfig == "" {
 		log.Printf("using in-cluster configuration")
 		config, err = rest.InClusterConfig()
 	} else {
-		log.Printf("using configuration from '%s'", f.Kubeconfig)
-		config, err = clientcmd.BuildConfigFromFlags("", f.Kubeconfig)
+		log.Printf("using configuration from '%s'", f.KubeConfig)
+		config, err = clientcmd.BuildConfigFromFlags("", f.KubeConfig)
 	}
-
 	if err != nil {
 		panic(err)
 	}
@@ -61,10 +85,24 @@ func main() {
 	options := replicate.ReplicatorOptions{
 		AllowAll:      f.AllowAll,
 		IgnoreUnknown: f.IgnoreUnknown,
+		Labels:        f.Labels,
 	}
 
-	var replicators []replicate.Replicator
-	for _, newReplicator := range(newReplicatorFuncs) {
+	selectedReplicatorFuncs := map[string]newReplicatorFunc{}
+	for _, replicator := range(f.Replicators) {
+		if replicator == "all" {
+			for key, value := range newReplicatorFuncs {
+				selectedReplicatorFuncs[key] = value
+			}
+		} else if value, ok := newReplicatorFuncs[replicator]; ok {
+			selectedReplicatorFuncs[replicator] = value
+		} else {
+			panic(fmt.Errorf("no replicator %s", replicator))
+		}
+	}
+
+	replicators := []replicate.Replicator{}
+	for _, newReplicator := range(selectedReplicatorFuncs) {
 		replicators = append(replicators, newReplicator(client, options, f.ResyncPeriod))
 	}
 
@@ -77,8 +115,8 @@ func main() {
 		Replicators: replicators,
 	}
 
-	log.Printf("starting liveness monitor at %s", f.StatusAddr)
+	log.Printf("starting liveness monitor at %s", f.StatusAddress)
 
 	http.Handle("/healthz", &h)
-	http.ListenAndServe(f.StatusAddr, nil)
+	http.ListenAndServe(f.StatusAddress, nil)
 }

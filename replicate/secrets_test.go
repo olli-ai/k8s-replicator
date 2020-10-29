@@ -320,6 +320,7 @@ func TestSecret_install_update_empty(t *testing.T) {
 	if assert.True(t, ok, "store") {
 		assert.Equal(t, expected, new, "store")
 	}
+}
 
 func TestSecret_install_create_data(t *testing.T) {
 	replicator, watcher := createReplicator(_secretActions, "test-ns")
@@ -541,7 +542,7 @@ func TestSecret_Delete(t *testing.T) {
 	require.Equal(t, 2, len(watcher.Actions), "len(actions)")
 	require.Equal(t, "delete", watcher.Actions[1].GetVerb())
 	require.Equal(t, "test-delete", watcher.Actions[1].(DeleteAction).GetName())
-	// TODO: test delete option (impossible with the current implementation)
+	// TODO: test delete option (impossible with the current implementation of fake client)
 	_, err = secrets.Get("test-clear", metav1.GetOptions{})
 	require.Error(t, err)
 }

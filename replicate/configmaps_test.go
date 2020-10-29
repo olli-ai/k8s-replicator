@@ -589,7 +589,7 @@ func TestConfigMap_Delete(t *testing.T) {
 	require.Equal(t, 2, len(watcher.Actions), "len(actions)")
 	require.Equal(t, "delete", watcher.Actions[1].GetVerb())
 	require.Equal(t, "test-delete", watcher.Actions[1].(DeleteAction).GetName())
-	// TODO: test delete option (impossible with the current implementation)
+	// TODO: test delete option (impossible with the current implementation of fake client)
 	_, err = configmaps.Get("test-clear", metav1.GetOptions{})
 	require.Error(t, err)
 }

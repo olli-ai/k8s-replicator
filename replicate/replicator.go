@@ -480,9 +480,14 @@ func (r *ObjectReplicator) installObject(target string, targetObject interface{}
 		copyMeta := metav1.ObjectMeta{
 			Namespace:   targetSplit[0],
 			Name:        targetSplit[1],
-			Annotations: map[string]string{},
+			Labels:      make(map[string]string, len(r.Labels)),
+			Annotations: make(map[string]string, 3),
 		}
-
+		// copy the labels
+		for key, value := range r.Labels {
+			copyMeta.Labels[key] = value
+		}
+		// add the annotations
 		copyMeta.Annotations[ReplicatedByAnnotation] = fmt.Sprintf("%s/%s",
 			sourceMeta.Namespace, sourceMeta.Name)
 		copyMeta.Annotations[ReplicateFromAnnotation] = source
@@ -549,9 +554,14 @@ func (r *ObjectReplicator) installObject(target string, targetObject interface{}
 	copyMeta := metav1.ObjectMeta{
 		Namespace:   targetSplit[0],
 		Name:        targetSplit[1],
-		Annotations: map[string]string{},
+		Labels:      make(map[string]string, len(r.Labels)),
+		Annotations: make(map[string]string, 6),
 	}
-
+	// copy the labels
+	for key, value := range r.Labels {
+		copyMeta.Labels[key] = value
+	}
+	// add the annotations
 	copyMeta.Annotations[ReplicatedAtAnnotation] = time.Now().Format(time.RFC3339)
 	copyMeta.Annotations[ReplicatedByAnnotation] = fmt.Sprintf("%s/%s",
 		sourceMeta.Namespace, sourceMeta.Name)

@@ -2,8 +2,6 @@
 
 `k8s-replicator` is a stateless controller used to replicate configMaps and secrets, to make them available in multiple namespaces, or to create persistent objects form helm deployments, that won't be cleared by the next deployment.
 
-## Goals
-
 This controller is designed to solve those problems:
 - Secrets and configMaps are only available in a specific namespace, and there is no easy way to make a configMap or secret available across the whole cluster.
 - Helm deployments systematically replace all the objects and don't allow any persistent values across successive deployment, which is especially problematic for randomly generated passwords.
@@ -272,8 +270,23 @@ stringData:
 
 This way, the source of the secret (external secret, helm value, or random) can be easily configured, the secret won't be erased by future deployment and the random password won't change unless the login changes.
 
+## Configuration
+
+| Helm parameter   | Argument             | Description                                                                                                            | Default                                                 |
+|------------------|----------------------|------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------|
+| allowAll          | --allow-all          | Implicitly allow to copy from any secret or configMap                                                                  | `false`                                                 |
+| ignoreUnknown     | --ignore-unknown     | Unknown annotations with the same prefix do not raise an error                                                         | `false`                                                 |
+| resyncPeriod      | --resync-period      | How often the kubernetes informers should resynchronize                                                                | `30m`                                                   |
+| runReplicators    | --run-replicators    | The replicators to run, `all` or a comma-separated list of case-insensitive replicators (`secret,configMap`)           | `all`                                                   |
+| annotationsPrefix | --annotations-prefix | The prefix to use on every annotations                                                                                 | `k8s-replicator`                                        |
+| createWithLabels  | --create-with-labels | A comma-separated list of labels and values to apply to created secrets and configMaps (`label1=value1,label2=value2`) | `app.kubernetes.io/managed-by={.Values.prefixOverride}` |
+| nameOverride      |                      | Overrides the name used in the label selector and the default name of the resources                                    | `{.Chart.Name}`                                         |
+| fullnameOverride  |                      | Overrides the name of the resources                                                                                    | `{.Release.Name}-{.Values.nameOverride}`                |
+|                   | --status-address     | The address for the status HTTP endpoint                                                                               | `:9102`                                                 |
+|                   | --kube-config        | The path to Kubernetes config file                                                                                     |                                                         |
+
 ## Replicating more resources
 
-`k8s-replicator` can easily be extended to replicate an resource in kubernetes, as long as it has a namespace and annotations. To create a new replicator, you need to provide:
-- a constructor that will provide the watcher for the desired resource, as long as the namespaces
+`k8s-replicator` can easily be extended to replicate any resource in kubernetes, as long as it has a namespace and annotations. To create a new replicator, you need to provide:
+- a constructor that will provide the watcher for the desired resource
 - functions that provide the actions `update`, `clear`, `install` and `delete`

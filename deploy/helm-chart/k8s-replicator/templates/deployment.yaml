@@ -25,7 +25,7 @@ spec:
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         command:
         - /k8s-replicator
-        - --prefix
+        - --annotations-prefix
         - {{ template "k8s-replicator.prefix" . }}
         {{- if .Values.allowAll }}
         - --allow-all
@@ -33,6 +33,12 @@ spec:
         {{- if .Values.ignoreUnknown }}
         - --ignore-unknown
         {{- end }}
+        - --resync-period
+        - {{ .Values.resyncPeriod | quote }}
+        - --create-with-labels
+        - {{ .Values.createWithLabels | quote }}
+        - --run-replicators
+        - {{ .Values.runReplicators | quote }}
         ports:
         - name: health
           containerPort: 9102

@@ -4,10 +4,14 @@ import "time"
 
 type flags struct {
 	AnnotationsPrefix string
-	Kubeconfig        string
+	KubeConfig        string
 	ResyncPeriodS     string
 	ResyncPeriod      time.Duration
-	StatusAddr        string
+	ReplicatorsS      string
+	Replicators       []string
+	LabelsS           string
+	Labels            map[string]string
+	StatusAddress     string
 	AllowAll          bool
 	IgnoreUnknown     bool
 }
