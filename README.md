@@ -12,7 +12,7 @@ This controller is designed to solve those problems:
 
 ```shellsession
 $ helm repo add olli-ai https://olli-ai.github.io/helm-charts/
-$ helm upgrade --install olli-ai/k8s-replicator --name k8s-replicator
+$ helm upgrade --install k8s-replicator olli-ai/k8s-replicator
 ```
 
 ### Using Helm
