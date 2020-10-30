@@ -8,6 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 )
 
 var _configMapActions *configMapActions = &configMapActions{}
@@ -18,19 +19,14 @@ func NewConfigMapReplicator(client kubernetes.Interface, options ReplicatorOptio
 		ReplicatorProps:   NewReplicatorProps(client, "configMap", options),
 		ReplicatorActions: _configMapActions,
 	}
-	listFunc := func(lo metav1.ListOptions) (runtime.Object, []interface{}, error) {
-		list, err := client.CoreV1().ConfigMaps("").List(lo)
-		if err != nil {
-			return list, nil, err
-		}
-		copy := make([]interface{}, len(list.Items))
-		for index := range list.Items {
-			copy[index] = &list.Items[index]
-		}
-		return list, copy, err
+	configmaps := client.CoreV1().ConfigMaps("")
+	listWatch := cache.ListWatch{
+		ListFunc: func(lo metav1.ListOptions) (runtime.Object, error) {
+			return configmaps.List(lo)
+		},
+		WatchFunc: configmaps.Watch,
 	}
-	watchFunc := client.CoreV1().ConfigMaps("").Watch
-	repl.InitStores(listFunc, watchFunc, &v1.ConfigMap{}, resyncPeriod)
+	repl.InitStores(&listWatch, &v1.ConfigMap{}, resyncPeriod)
 	return &repl
 }
 

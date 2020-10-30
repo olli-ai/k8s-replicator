@@ -19,14 +19,14 @@ var f flags
 
 func init() {
 	var err error
-	flag.StringVar(&f.AnnotationsPrefix, "annotations-prefix", "v1.kubernetes-replicator.olli.com/", "prefix for all annotations")
+	flag.StringVar(&f.AnnotationsPrefix, "annotations-prefix", "k8s-replicator", "prefix for all annotations")
 	flag.StringVar(&f.KubeConfig, "kube-config", "", "path to Kubernetes config file")
 	flag.StringVar(&f.ResyncPeriodS, "resync-period", "30m", "resynchronization period")
 	flag.StringVar(&f.ReplicatorsS, "run-replicators", "all", "replicators to run")
-	flag.StringVar(&f.LabelsS, "create-with-labels", "", "labels to add to created resources")
+	flag.StringVar(&f.LabelsS, "create-with-labels", "app.kubernetes.io/managed-by=k8s-replicator", "labels to add to created resources")
 	flag.StringVar(&f.StatusAddress, "status-address", ":9102", "listen address for status and monitoring server")
 	flag.BoolVar(&f.AllowAll, "allow-all", false, "allow replication of all secrets by default (CAUTION: only use when you know what you're doing)")
-	flag.BoolVar(&f.IgnoreUnknown, "ignore-unknown", true, "unkown annotations with the same prefix do not raise an error")
+	flag.BoolVar(&f.IgnoreUnknown, "ignore-unknown", false, "unkown annotations with the same prefix do not raise an error")
 	flag.Parse()
 
 	replicate.PrefixAnnotations(f.AnnotationsPrefix)

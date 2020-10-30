@@ -595,10 +595,8 @@ func TestConfigMap_Delete(t *testing.T) {
 }
 
 func TestNewConfigMapReplicator(t *testing.T) {
-	hour, err := time.ParseDuration("1h")
-	require.NoError(t, err)
-	second, err := time.ParseDuration("0.5s")
-	require.NoError(t, err)
+	resyncPeriod := time.Hour
+	sleep := 500 * time.Millisecond
 	client := fake.NewSimpleClientset(&v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "source-ns",
@@ -612,9 +610,9 @@ func TestNewConfigMapReplicator(t *testing.T) {
 			Name: "target-1",
 		},
 	})
-	replicator := NewConfigMapReplicator(client, ReplicatorOptions{AllowAll: true}, hour)
+	replicator := NewConfigMapReplicator(client, ReplicatorOptions{AllowAll: true}, resyncPeriod)
 	replicator.Start()
-	_, err = client.CoreV1().ConfigMaps("from-ns").Create(&v1.ConfigMap{
+	_, err := client.CoreV1().ConfigMaps("from-ns").Create(&v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: "from-ns",
 			Name: "from",
@@ -641,7 +639,7 @@ func TestNewConfigMapReplicator(t *testing.T) {
 		},
 	})
 	require.NoError(t, err, "target-2")
-	time.Sleep(second)
+	time.Sleep(sleep)
 
 	configmap, err := client.CoreV1().ConfigMaps("from-ns").Get("from", metav1.GetOptions{})
 	if assert.NoError(t, err, "from-ns/from") {
@@ -658,7 +656,7 @@ func TestNewConfigMapReplicator(t *testing.T) {
 
 	err = client.CoreV1().ConfigMaps("to-ns").Delete("to", &metav1.DeleteOptions{})
 	require.NoError(t, err, "to-ns/to")
-	time.Sleep(second)
+	time.Sleep(sleep)
 	configmap, err = client.CoreV1().ConfigMaps("target-1").Get("target", metav1.GetOptions{})
 	assert.Error(t, err, "target-1/target")
 	configmap, err = client.CoreV1().ConfigMaps("target-2").Get("target", metav1.GetOptions{})

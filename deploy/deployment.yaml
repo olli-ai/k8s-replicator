@@ -16,8 +16,6 @@ spec:
         image: olliai/k8s-replicator:latest
         command:
         - /k8s-replicator
-        - --prefix
-        - k8s-replicator/
         ports:
         - name: health
           containerPort: 9102

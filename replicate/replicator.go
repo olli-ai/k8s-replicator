@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 )
@@ -50,58 +50,87 @@ func (r *ObjectReplicator) Start() {
 	go r.objectController.Run(wait.NeverStop)
 }
 
-type replicatorListFunc func(metav1.ListOptions) (runtime.Object, []interface{}, error)
-
 // init namespace store and object store
-func (r *ObjectReplicator) InitStores(listFunc replicatorListFunc, watchFunc cache.WatchFunc, objType runtime.Object, resyncPeriod time.Duration) {
-	r.namespaceStore, r.namespaceController = cache.NewInformer(
+func (r *ObjectReplicator) InitStores(lw cache.ListerWatcher, objType runtime.Object, resyncPeriod time.Duration) {
+	namespaces := r.client.CoreV1().Namespaces()
+	r.namespaceStore, r.namespaceController = newFilledInformer(
 		&cache.ListWatch{
 			ListFunc: func(lo metav1.ListOptions) (runtime.Object, error) {
-				list, err := r.client.CoreV1().Namespaces().List(lo)
-				if err != nil {
-					return list, err
-				}
-				// populate the store already, to avoid believing some items are deleted
-				copy := make([]interface{}, len(list.Items))
-				for index := range list.Items {
-					copy[index] = &list.Items[index]
-				}
-				err = r.namespaceStore.Replace(copy, "init")
-				return list, err
+				return namespaces.List(lo)
 			},
-			WatchFunc: func(lo metav1.ListOptions) (watch.Interface, error) {
-				return r.client.CoreV1().Namespaces().Watch(lo)
-			},
+			WatchFunc: namespaces.Watch,
 		},
 		&v1.Namespace{},
 		resyncPeriod,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc:    r.NamespaceAdded,
-			// UpdateFunc: func(old interface{}, new interface{}) {},
-			// DeleteFunc: func(obj interface{}) {},
 		},
 	)
-
-	r.objectStore, r.objectController = cache.NewInformer(
-		&cache.ListWatch{
-			ListFunc: func(lo metav1.ListOptions) (runtime.Object, error) {
-				list, items, err := listFunc(lo)
-				// populate the store already, to avoid believing some items are deleted
-				if err == nil {
-					err = r.objectStore.Replace(items, "init")
-				}
-				return list, err
-			},
-			WatchFunc: watchFunc,
-		},
+	r.objectStore, r.objectController = newFilledInformer(
+		lw,
 		objType,
 		resyncPeriod,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc:    r.ObjectAdded,
-			UpdateFunc: func(old interface{}, new interface{}) { r.ObjectAdded(new) },
+			UpdateFunc: func(old interface{}, new interface{}) {
+				r.ObjectAdded(new)
+			},
 			DeleteFunc: r.ObjectDeleted,
 		},
 	)
+}
+
+const CreatedResourceVersion = "k8s-replicator"
+
+// an informer that fills the store on list call
+func newFilledInformer(lw cache.ListerWatcher, objType runtime.Object, resyncPeriod time.Duration, handlers cache.ResourceEventHandler) (cache.Store, cache.Controller) {
+	var store cache.Store
+	var controller cache.Controller
+	store, controller = cache.NewInformer(
+		&cache.ListWatch{
+			ListFunc: func(lo metav1.ListOptions) (runtime.Object, error) {
+				if object, err := lw.List(lo); err != nil {
+					return object, err
+				} else if list, err := meta.ListAccessor(object); err != nil {
+					return object, err
+				} else if items, err := meta.ExtractList(object); err != nil {
+					return object, err
+				// fill up the store already, to avoid thinking other resources don't exist
+				} else {
+					copy := make([]interface{}, len(items))
+					for index, item := range items {
+						item = item.DeepCopyObject()
+						if accessor, err := meta.Accessor(item); err != nil {
+							return object, err
+						// set a specific ResourceVersion to detect an "update" event as an "add" event
+						} else {
+							accessor.SetResourceVersion(CreatedResourceVersion)
+						}
+						copy[index] = item
+					}
+					version := list.GetResourceVersion()
+					err = store.Replace(copy, version)
+					return object, err
+				}
+			},
+			WatchFunc: lw.Watch,
+		},
+		objType,
+		resyncPeriod,
+		cache.ResourceEventHandlerFuncs{
+			AddFunc:    handlers.OnAdd,
+			UpdateFunc: func(old interface{}, new interface{}) {
+				// because of the store fill up, an "update" event is sent instead of an "add" event
+				if accessor, err := meta.Accessor(old); err == nil && accessor.GetResourceVersion() == CreatedResourceVersion {
+					handlers.OnAdd(new)
+				} else {
+					handlers.OnUpdate(old, new)
+				}
+			},
+			DeleteFunc: handlers.OnDelete,
+		},
+	)
+	return store, controller
 }
 
 // Called when a namespace is seen in kubernetes

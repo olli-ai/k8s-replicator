@@ -12,7 +12,7 @@ This controller is designed to solve those problems:
 
 ```shellsession
 $ helm repo add olli-ai https://olli-ai.github.io/helm-charts/
-$ helm install olli-ai/k8s-replicator --name k8s-replicator
+$ helm upgrade --install olli-ai/k8s-replicator --name k8s-replicator
 ```
 
 ### Using Helm
@@ -107,7 +107,7 @@ The generated secret or configMap is delete if its creator is deleted, and clear
 
 The state of the replicated objects is stored in the annotations, so `k8s-replicator` is resilient to restarts and kubernetes errors, and won't perform redundant actions. All updates / creations / deletions are performed against the `ResourceVersion`, so any outdated update will fail.
 
-If any annotations is detected to be illformed, no actions will be performed. This ensures that no unintended action is performed because of a human error, avoiding to unintentionally delete or clear a secret or configMap.
+If any annotations is detected to be illformed, no actions will be performed. This is also the case if the an unknown annotation with the same prefix is detected, unless `--ignore-unknown` option is passed. This ensures that no unintended action is performed because of a human error, avoiding to unintentionally delete or clear a secret or configMap.
 
 The logs of the `k8s-replicator` pod will show the full history of actions, and explanations why some of these actions are cancelled.
 
@@ -202,7 +202,7 @@ apiVersion: v1
 kind: Secret
 type: kubernetes.io/tls
 metadata:
-  name: my-tls
+  name: tls-example-com
   namespace: jx
   annotations:
     k8s-replicator/replicate-to-namespaces: "jx-.*"
@@ -222,11 +222,14 @@ And use it in your ingresses in any namespace you replicated to
 ```yaml
 apiVersion: networking.k8s.io/v1beta1
 kind: Ingress
+metadata:
+  name: my-ingress
+  namespace: jx-production
 spec:
   tls:
   - hosts:
-    - example.com
-    secretName: my-tls
+    - subdomain.example.com
+    secretName: tls-example-com
 ```
 
 ### Configurable secret for helm charts
@@ -272,21 +275,137 @@ This way, the source of the secret (external secret, helm value, or random) can 
 
 ## Configuration
 
-| Helm parameter   | Argument             | Description                                                                                                            | Default                                                 |
-|------------------|----------------------|------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------|
-| allowAll          | --allow-all          | Implicitly allow to copy from any secret or configMap                                                                  | `false`                                                 |
-| ignoreUnknown     | --ignore-unknown     | Unknown annotations with the same prefix do not raise an error                                                         | `false`                                                 |
-| resyncPeriod      | --resync-period      | How often the kubernetes informers should resynchronize                                                                | `30m`                                                   |
-| runReplicators    | --run-replicators    | The replicators to run, `all` or a comma-separated list of case-insensitive replicators (`secret,configMap`)           | `all`                                                   |
-| annotationsPrefix | --annotations-prefix | The prefix to use on every annotations                                                                                 | `k8s-replicator`                                        |
-| createWithLabels  | --create-with-labels | A comma-separated list of labels and values to apply to created secrets and configMaps (`label1=value1,label2=value2`) | `app.kubernetes.io/managed-by={.Values.prefixOverride}` |
-| nameOverride      |                      | Overrides the name used in the label selector and the default name of the resources                                    | `{.Chart.Name}`                                         |
-| fullnameOverride  |                      | Overrides the name of the resources                                                                                    | `{.Release.Name}-{.Values.nameOverride}`                |
-|                   | --status-address     | The address for the status HTTP endpoint                                                                               | `:9102`                                                 |
-|                   | --kube-config        | The path to Kubernetes config file                                                                                     |                                                         |
+| Helm parameter    | Argument             | Description                                                                                                            | Default                                                    |
+|-------------------|----------------------|------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------|
+| allowAll          | --allow-all          | Implicitly allow to copy from any secret or configMap                                                                  | `false`                                                    |
+| ignoreUnknown     | --ignore-unknown     | Unknown annotations with the same prefix do not raise an error                                                         | `false`                                                    |
+| resyncPeriod      | --resync-period      | How often the kubernetes informers should resynchronize                                                                | `30m`                                                      |
+| runReplicators    | --run-replicators    | The replicators to run, `all` or a comma-separated list of case-insensitive replicators (`secret,configMap`)           | `all`                                                      |
+| annotationsPrefix | --annotations-prefix | The prefix to use on every annotations                                                                                 | `k8s-replicator`                                           |
+| createWithLabels  | --create-with-labels | A comma-separated list of labels and values to apply to created secrets and configMaps (`label1=value1,label2=value2`) | `app.kubernetes.io/managed-by={.Values.annotationsPrefix}` |
+| nameOverride      |                      | Overrides the name used in the label selector and the default name of the resources                                    | `{.Chart.Name}`                                            |
+| fullnameOverride  |                      | Overrides the name of the resources                                                                                    | `{.Release.Name}-{.Values.nameOverride}`                   |
+|                   | --status-address     | The address for the status HTTP endpoint                                                                               | `:9102`                                                    |
+|                   | --kube-config        | The path to Kubernetes config file                                                                                     | cluster config                                             |
 
 ## Replicating more resources
 
-`k8s-replicator` can easily be extended to replicate any resource in kubernetes, as long as it has a namespace and annotations. To create a new replicator, you need to provide:
-- a constructor that will provide the watcher for the desired resource
-- functions that provide the actions `update`, `clear`, `install` and `delete`
+`k8s-replicator` can easily be extended to replicate any resource in kubernetes:
+```golang
+package mypackage
+
+import (
+    "log"
+    "time"
+
+    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    "k8s.io/apimachinery/pkg/runtime"
+    "k8s.io/client-go/kubernetes"
+    "k8s.io/client-go/tools/cache"
+)
+
+var _myActions *myActions = &myActions{}
+
+func NewMyReplicator(client kubernetes.Interface, options ReplicatorOptions, resyncPeriod time.Duration) Replicator {
+    repl := ObjectReplicator{
+        ReplicatorProps:   NewReplicatorProps(client, "myResource", options),
+        ReplicatorActions: _myActions,
+    }
+    myResurces := MyResources(client, "")
+    listWatch := cache.ListWatch{
+        ListFunc: func(lo metav1.ListOptions) (runtime.Object, error) {
+            return myResurces.List(lo)
+        },
+        WatchFunc: myResurces.Watch,
+    }
+    repl.InitStores(listWatch, &MyResource{}, resyncPeriod)
+    return &repl
+}
+
+type myActions struct {}
+
+func (*myActions) GetMeta(object interface{}) *metav1.ObjectMeta {
+    return &object.(*MyResources).ObjectMeta
+}
+
+func (*myActions) Update(client kubernetes.Interface, object interface{}, sourceObject interface{}, annotations map[string]string) (interface{}, error) {
+    mySource := sourceObject.(*MyResource)
+    myObject := object.(*MyResource).DeepCopy()
+    myObject.Annotations = annotations
+
+    // TODO: copy the data from mySource to myObject
+
+    log.Printf("updating my %s/%s", myObject.Namespace, myObject.Name)
+    update, err := MyResources(client, myObject.Namespace).Update(myObject)
+    if err != nil {
+        log.Printf("error while updating my %s/%s: %s", myObject.Namespace, myObject.Name, err)
+    }
+    return update, err
+}
+
+func (*myActions) Clear(client kubernetes.Interface, object interface{}, annotations map[string]string) (interface{}, error) {
+    myObject := object.(*MyResource).DeepCopy()
+    myObject.Annotations = annotations
+
+    // TODO: clear the data from myObject
+
+    log.Printf("clearing my %s/%s", myObject.Namespace, myObject.Name)
+    update, err := MyResources(client, myObject.Namespace).Update(myObject)
+    if err != nil {
+        log.Printf("error while clearing my %s/%s", myObject.Namespace, myObject.Name)
+    }
+    return update, err
+}
+
+func (*myActions) Install(client kubernetes.Interface, meta *metav1.ObjectMeta, sourceObject interface{}, dataObject interface{}) (interface{}, error) {
+    mySource := sourceObject.(*MyResource)
+    myObject = MyResource{
+        TypeMeta: mySource.TypeMeta,
+        ObjectMeta: *meta,
+    }
+
+    // TODO: copy other meta-fields from mySource to myObject
+
+    if dataObject != nil {
+        myData := dataObject.(*MyResource)
+
+        /// TODO: copy the data from myData to myObject
+
+    }
+    log.Printf("installing my %s/%s", myObject.Namespace, myObject.Name)
+    var update *MyResource
+    var err error
+    if myObject.ResourceVersion == "" {
+        update, err = MyResources(client, myObject.Namespace).Create(&myObject)
+    } else {
+        update, err = MyResources(client, myObject.Namespace).Update(&myObject)
+    }
+    if err != nil {
+        log.Printf("error while installing my %s/%s: %s", myObject.Namespace, myObject.Name, err)
+    }
+    return update, err
+}
+
+func (*myActions) Delete(client kubernetes.Interface, object interface{}) error {
+    myObject := object.(*MyResource)
+    log.Printf("deleting my %s/%s", myObject.Namespace, myObject.Name)
+    options := metav1.DeleteOptions{
+        Preconditions: &metav1.Preconditions{
+            ResourceVersion: &myObject.ResourceVersion,
+        },
+    }
+    err := MyResources(client, myObject.Namespace).Delete(myObject.Name, &options)
+    if err != nil {
+        log.Printf("error while deleting my %s/%s: %s", myObject.Namespace, myObject.Name, err)
+    }
+    return err
+}
+```
+And add the replicator function in `main.go`
+```golang
+var newReplicatorFuncs map[string]newReplicatorFunc = map[string]newReplicatorFunc{
+    "configmap":  replicate.NewConfigMapReplicator,
+    "secret":     replicate.NewSecretReplicator,
+    "myResource": mypackage.NewMyReplicator,
+}
+```

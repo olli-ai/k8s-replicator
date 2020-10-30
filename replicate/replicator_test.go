@@ -5,10 +5,14 @@ import (
 	"log"
 	"strconv"
 	"testing"
+	"time"
 
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/stretchr/testify/assert"
@@ -1775,4 +1779,86 @@ func TestReplicateToFrom_annotations(t *testing.T) {
 	})
 	assertStore(t, r, "target-ns", "target", "5")
 	requireActionsLength(t, r, 3)
+}
+
+func Test_newFilledInformer(t *testing.T) {
+	resyncPeriod := time.Hour
+	sleep := 500 * time.Millisecond
+
+	all := []string{"ns1", "ns2", "ns3"}
+	todo := map[string]bool{}
+	objects := []runtime.Object{}
+	for _, ns := range all {
+		todo[ns] = true
+		objects = append(objects, &v1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: ns,
+			},
+		})
+	}
+
+	var store cache.Store
+	var controller cache.Controller
+	nsAdded := func (object interface{}) {
+		ns := object.(*v1.Namespace).ObjectMeta.Name
+		assert.Truef(t, todo[ns], "already done %s", ns)
+		delete(todo, ns)
+		unseen := map[string]bool{}
+		for _, ns = range all {
+			unseen[ns] = true
+		}
+		for _, ns = range store.ListKeys() {
+			delete(unseen, ns)
+		}
+		assert.Emptyf(t, unseen, "unseen at %s", ns)
+	}
+
+	toUpdate := ""
+	nsUpdated := func (old interface{}, new interface{}) {
+		ns := new.(*v1.Namespace).ObjectMeta.Name
+		if assert.Equal(t, toUpdate, ns, "toUpdate") {
+			toUpdate = ""
+		}
+	}
+
+	toDelete := ""
+	nsDelete := func (object interface{}) {
+		ns := object.(*v1.Namespace).ObjectMeta.Name
+		if assert.Equal(t, toDelete, ns, "toDelete") {
+			toDelete = ""
+		}
+	}
+
+	client := fake.NewSimpleClientset(objects...)
+	namespaces := client.CoreV1().Namespaces()
+	store, controller = newFilledInformer(
+		&cache.ListWatch{
+			ListFunc: func(lo metav1.ListOptions) (runtime.Object, error) {
+				return namespaces.List(lo)
+			},
+			WatchFunc: namespaces.Watch,
+		},
+		&v1.Namespace{},
+		resyncPeriod,
+		cache.ResourceEventHandlerFuncs{
+			AddFunc:    nsAdded,
+			UpdateFunc: nsUpdated,
+			DeleteFunc: nsDelete,
+		},
+	)
+	go controller.Run(wait.NeverStop)
+
+	time.Sleep(sleep)
+	assert.Emptyf(t, todo, "todo")
+	toUpdate = "ns1"
+	namespaces.Update(&v1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "ns1",
+			},
+		})
+	toDelete = "ns2"
+	namespaces.Delete("ns2", &metav1.DeleteOptions{})
+	time.Sleep(sleep)
+	assert.Equal(t, "", toUpdate, "toUpdate")
+	assert.Equal(t, "", toDelete, "toDelete")
 }

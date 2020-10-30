@@ -8,6 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 )
 
 var _secretActions *secretActions = &secretActions{}
@@ -18,19 +19,14 @@ func NewSecretReplicator(client kubernetes.Interface, options ReplicatorOptions,
 		ReplicatorProps:   NewReplicatorProps(client, "secret", options),
 		ReplicatorActions: _secretActions,
 	}
-	listFunc := func(lo metav1.ListOptions) (runtime.Object, []interface{}, error) {
-		list, err := client.CoreV1().Secrets("").List(lo)
-		if err != nil {
-			return list, nil, err
-		}
-		copy := make([]interface{}, len(list.Items))
-		for index := range list.Items {
-			copy[index] = &list.Items[index]
-		}
-		return list, copy, err
+	secrets := client.CoreV1().Secrets("")
+	listWatch := cache.ListWatch{
+		ListFunc: func(lo metav1.ListOptions) (runtime.Object, error) {
+			return secrets.List(lo)
+		},
+		WatchFunc: secrets.Watch,
 	}
-	watchFunc := client.CoreV1().Secrets("").Watch
-	repl.InitStores(listFunc, watchFunc, &v1.Secret{}, resyncPeriod)
+	repl.InitStores(&listWatch, &v1.Secret{}, resyncPeriod)
 	return &repl
 }
 
