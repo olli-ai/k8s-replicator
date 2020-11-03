@@ -51,10 +51,13 @@ git commit -m "Bump appVersion to 'v${RELEASE_VERSION}'"
 ## rebase
 git pull --rebase publisher master
 
+## update the tag
+git tag -f "v${RELEASE_VERSION}"
+
 if [[ "${1}" == "publish" ]]; then
 
     ## publish changes
-    git push publisher master
+    git push publisher master "v${RELEASE_VERSION}"
 
     ## trigger helm-charts reload
     curl -X POST "https://api.github.com/repos/${CHARTS_REPOSITORY}/dispatches" -u "${RELEASE_USER}:${RELEASE_USER_TOKEN}" -d '{"event_type": "updateCharts"}'
