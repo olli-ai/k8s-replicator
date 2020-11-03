@@ -63,11 +63,11 @@ func (*configMapActions) Update(client kubernetes.Interface, object interface{},
 		configMap.BinaryData = nil
 	}
 
-	log.Printf("updating config map %s/%s", configMap.Namespace, configMap.Name)
+	log.Printf("updating configMap %s/%s", configMap.Namespace, configMap.Name)
 	// update the configMap
 	update, err := client.CoreV1().ConfigMaps(configMap.Namespace).Update(configMap)
 	if err != nil {
-		log.Printf("error while updating config map %s/%s: %s", configMap.Namespace, configMap.Name, err)
+		log.Printf("error while updating configMap %s/%s: %s", configMap.Namespace, configMap.Name, err)
 	}
 	return update, err
 }
@@ -82,11 +82,11 @@ func (*configMapActions) Clear(client kubernetes.Interface, object interface{}, 
 	// clear the binary data
 	configMap.BinaryData = nil
 
-	log.Printf("clearing config map %s/%s", configMap.Namespace, configMap.Name)
+	log.Printf("clearing configMap %s/%s", configMap.Namespace, configMap.Name)
 	// update the configMap
 	update, err := client.CoreV1().ConfigMaps(configMap.Namespace).Update(configMap)
 	if err != nil {
-		log.Printf("error while clearing config map %s/%s", configMap.Namespace, configMap.Name)
+		log.Printf("error while clearing configMap %s/%s", configMap.Namespace, configMap.Name)
 	}
 	return update, err
 }
@@ -122,7 +122,7 @@ func (*configMapActions) Install(client kubernetes.Interface, meta *metav1.Objec
 		}
 	}
 
-	log.Printf("installing config map %s/%s", configMap.Namespace, configMap.Name)
+	log.Printf("installing configMap %s/%s", configMap.Namespace, configMap.Name)
 
 	var update *v1.ConfigMap
 	var err error
@@ -135,14 +135,14 @@ func (*configMapActions) Install(client kubernetes.Interface, meta *metav1.Objec
 	}
 
 	if err != nil {
-		log.Printf("error while installing config map %s/%s: %s", configMap.Namespace, configMap.Name, err)
+		log.Printf("error while installing configMap %s/%s: %s", configMap.Namespace, configMap.Name, err)
 	}
 	return update, err
 }
 
 func (*configMapActions) Delete(client kubernetes.Interface, object interface{}) error {
 	configMap := object.(*v1.ConfigMap)
-	log.Printf("deleting config map %s/%s", configMap.Namespace, configMap.Name)
+	log.Printf("deleting configMap %s/%s", configMap.Namespace, configMap.Name)
 	// prepare the delete options
 	options := metav1.DeleteOptions{
 		Preconditions: &metav1.Preconditions{
@@ -152,7 +152,7 @@ func (*configMapActions) Delete(client kubernetes.Interface, object interface{})
 	// delete the configMap
 	err := client.CoreV1().ConfigMaps(configMap.Namespace).Delete(configMap.Name, &options)
 	if err != nil {
-		log.Printf("error while deleting config map %s/%s: %s", configMap.Namespace, configMap.Name, err)
+		log.Printf("error while deleting configMap %s/%s: %s", configMap.Namespace, configMap.Name, err)
 	}
 	return err
 }

@@ -137,7 +137,7 @@ func newFilledInformer(lw cache.ListerWatcher, objType runtime.Object, resyncPer
 // Creates the resouces that should be replicated in that namespace
 func (r *ObjectReplicator) NamespaceAdded(object interface{}) {
 	namespace := object.(*v1.Namespace)
-	log.Printf("new namespace %s", namespace.Name)
+	log.Printf("new namespace %s for %s replication", namespace.Name, r.Name)
 	// find all the objects which want to replicate to that namespace
 	todo := map[string]bool{}
 
