@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/olli-ai/kubernetes-replicator/replicate"
+	"github.com/olli-ai/k8s-replicator/replicate"
 
 	"github.com/stretchr/testify/assert"
 )

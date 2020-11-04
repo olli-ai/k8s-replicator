@@ -2,7 +2,7 @@ deploy/
 build/
 dist/
 test*
-kubernetes-replicator
+k8s-replicator
 
 LICENSE
 *.txt

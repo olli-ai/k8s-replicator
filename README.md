@@ -298,7 +298,7 @@ import (
     "log"
     "time"
 
-    "github.com/olli-ai/kubernetes-replicator/replicate"
+    "github.com/olli-ai/k8s-replicator/replicate"
 
     metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
     "k8s.io/apimachinery/pkg/runtime"

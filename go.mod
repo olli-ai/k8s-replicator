@@ -1,4 +1,4 @@
-module github.com/olli-ai/kubernetes-replicator
+module github.com/olli-ai/k8s-replicator
 
 go 1.13
 

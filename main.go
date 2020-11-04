@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/olli-ai/kubernetes-replicator/liveness"
-	"github.com/olli-ai/kubernetes-replicator/replicate"
+	"github.com/olli-ai/k8s-replicator/liveness"
+	"github.com/olli-ai/k8s-replicator/replicate"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
