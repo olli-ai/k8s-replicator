@@ -46,7 +46,7 @@ git add -A
 git status
 
 ## stage changes
-git commit -m "Bump appVersion to 'v${RELEASE_VERSION}'"
+git commit -m "Bump appVersion to 'v${RELEASE_VERSION}'" || true
 
 ## update the tag
 git tag -f "v${RELEASE_VERSION}"
