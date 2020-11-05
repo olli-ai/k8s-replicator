@@ -4,22 +4,31 @@ import (
 	"strings"
 )
 
-// Annotations that are used to control this controller's behaviour
-
-var annotationsPrefix = ""
-
+// Annotations that are used to specify this controller's behaviour
 var (
+	// ReplicateFromAnnotation tells to replicate from a source object to this object
 	ReplicateFromAnnotation         = "replicate-from"
+	// ReplicateToAnnotation tells to replicate this object to a target object(s)
 	ReplicateToAnnotation           = "replicate-to"
+	// ReplicateToNsAnnotation tells to replicate this object to a target namespace(s)
 	ReplicateToNsAnnotation         = "replicate-to-namespaces"
+	// ReplicateOnceAnnotation tells to replicate only once
 	ReplicateOnceAnnotation         = "replicate-once"
+	// ReplicateOnceVersionAnnotation tells to replicate once again when the annotation's value changes
 	ReplicateOnceVersionAnnotation  = "replicate-once-version"
+	// ReplicatedAtAnnotation stores when this object was replicated
 	ReplicatedAtAnnotation          = "replicated-at"
+	// ReplicatedByAnnotation stores which object created this replication
 	ReplicatedByAnnotation          = "replicated-by"
+	// ReplicatedFromVersionAnnotation stores the resource version of the source when replicated to this object
 	ReplicatedFromVersionAnnotation = "replicated-from-version"
+	// ReplicationAllowedAnnotation explicitely allows replication
 	ReplicationAllowedAnnotation    = "replication-allowed"
+	// ReplicationAllowedNsAnnotation explicitely allows replication to the specified namespace(s)
 	ReplicationAllowedNsAnnotation  = "replication-allowed-namespaces"
 )
+
+var annotationsPrefix = ""
 
 var annotationRefs = map[string]*string{
 	ReplicateFromAnnotation:         &ReplicateFromAnnotation,
@@ -45,6 +54,7 @@ func PrefixAnnotations(prefix string){
 	}
 }
 
+// UnknownAnnotations returns the list of the unknown annotations with the same prefix
 func UnknownAnnotations(annotations map[string]string) []string {
 	var unknown []string = nil
 	if annotationsPrefix != "" {

@@ -1786,46 +1786,68 @@ func Test_newFilledInformer(t *testing.T) {
 	sleep := 500 * time.Millisecond
 
 	all := []string{"ns1", "ns2", "ns3"}
+	copies := map[string]*v1.Namespace{}
 	todo := map[string]bool{}
 	objects := []runtime.Object{}
-	for _, ns := range all {
+	for index, ns := range all {
 		todo[ns] = true
-		objects = append(objects, &v1.Namespace{
+		object := v1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: ns,
+				ResourceVersion: "v" + strconv.Itoa(index),
+				Labels: M{
+					"l" + strconv.Itoa(index): strconv.Itoa(index),
+				},
+				Annotations: M{
+					"a" + strconv.Itoa(index): strconv.Itoa(index),
+				},
 			},
-		})
+		}
+		copies[ns] = object.DeepCopy()
+		objects = append(objects, object.DeepCopy())
 	}
 
 	var store cache.Store
 	var controller cache.Controller
 	nsAdded := func (object interface{}) {
-		ns := object.(*v1.Namespace).ObjectMeta.Name
-		assert.Truef(t, todo[ns], "already done %s", ns)
-		delete(todo, ns)
+		ns, ok := object.(*v1.Namespace)
+		require.True(t, ok)
+		assert.Truef(t, todo[ns.Name], "already added %s", ns.Name)
+		assert.Equalf(t, copies[ns.Name], ns, "added different %s", ns.Name)
+		delete(todo, ns.Name)
 		unseen := map[string]bool{}
-		for _, ns = range all {
-			unseen[ns] = true
+		for _, n := range all {
+			unseen[n] = true
 		}
-		for _, ns = range store.ListKeys() {
-			delete(unseen, ns)
+		for _, o := range store.List() {
+			n, ok := o.(*v1.Namespace)
+			require.True(t, ok)
+			assert.Equalf(t, copies[n.Name], n, "stored different %s", n.Name)
+			delete(unseen, n.Name)
 		}
-		assert.Emptyf(t, unseen, "unseen at %s", ns)
+		assert.Emptyf(t, unseen, "unseen when added %s", ns.Name)
 	}
 
-	toUpdate := ""
+	var toUpdate *v1.Namespace
 	nsUpdated := func (old interface{}, new interface{}) {
-		ns := new.(*v1.Namespace).ObjectMeta.Name
-		if assert.Equal(t, toUpdate, ns, "toUpdate") {
-			toUpdate = ""
+		ns, ok := new.(*v1.Namespace)
+		require.True(t, ok)
+		ons, ok := old.(*v1.Namespace)
+		require.True(t, ok)
+		if assert.NotNilf(t, toUpdate, "unexpected update %s", ns.Name) && assert.Equal(t, toUpdate.Name, ns.Name, "unexpected update %s, expected %s", ns.Name, toUpdate.Name) {
+			assert.Equalf(t, toUpdate, ns, "updated differnt new %s", ns.Name)
+			assert.Equalf(t, copies[ns.Name], ons, "updated differnt old %s", ns.Name)
+			toUpdate = nil
 		}
 	}
 
-	toDelete := ""
+	var toDelete *v1.Namespace
 	nsDelete := func (object interface{}) {
-		ns := object.(*v1.Namespace).ObjectMeta.Name
-		if assert.Equal(t, toDelete, ns, "toDelete") {
-			toDelete = ""
+		ns, ok := object.(*v1.Namespace)
+		require.True(t, ok)
+		if assert.NotNilf(t, toDelete, "unexpected delete %s", ns.Name) && assert.Equal(t, toDelete.Name, ns.Name, "unexpected delete %s, expected %s", ns.Name, toDelete.Name) {
+			assert.Equalf(t, toDelete, ns, "deleted differnt %s", ns.Name)
+			toDelete = nil
 		}
 	}
 
@@ -1850,15 +1872,22 @@ func Test_newFilledInformer(t *testing.T) {
 
 	time.Sleep(sleep)
 	assert.Emptyf(t, todo, "todo")
-	toUpdate = "ns1"
-	namespaces.Update(&v1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "ns1",
+	toUpdate = &v1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "ns1",
+			ResourceVersion: "v" + strconv.Itoa(len(all)),
+			Labels: M{
+				"l" + strconv.Itoa(len(all)): strconv.Itoa(len(all)),
 			},
-		})
-	toDelete = "ns2"
+			Annotations: M{
+				"a" + strconv.Itoa(len(all)): strconv.Itoa(len(all)),
+			},
+		},
+	}
+	namespaces.Update(toUpdate.DeepCopy())
+	toDelete = copies["ns2"]
 	namespaces.Delete("ns2", &metav1.DeleteOptions{})
 	time.Sleep(sleep)
-	assert.Equal(t, "", toUpdate, "toUpdate")
-	assert.Equal(t, "", toDelete, "toDelete")
+	assert.Nil(t, toUpdate, "update expected")
+	assert.Nil(t, toDelete, "delete expected")
 }

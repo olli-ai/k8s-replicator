@@ -50,6 +50,7 @@ func (pattern targetPattern) Targets(namespaces []string) []string {
 	return targets
 }
 
+// ReplicatorOptions is the public options to configure a replicator
 type ReplicatorOptions struct {
 	// when true, "allowed" annotations are ignored
 	AllowAll      bool
@@ -59,6 +60,7 @@ type ReplicatorOptions struct {
 	Labels        map[string]string
 }
 
+// ReplicatorProps is all the common properties for a repicator
 type ReplicatorProps struct {
 	// displayed name for the resources
 	Name                string
@@ -86,13 +88,13 @@ type ReplicatorProps struct {
 	watchedPatterns     map[string][]targetPattern
 }
 
-// Replicator describes the common interface that the secret and configmap
-// replicators should adhere to
+// Replicator describes the common interface for all replicators
 type Replicator interface {
 	Start()
 	Synced() bool
 }
 
+// NewReplicatorProps inits and returns the common replicator properties for a repicator
 func NewReplicatorProps(client kubernetes.Interface, name string, options ReplicatorOptions) ReplicatorProps {
 	return ReplicatorProps {
 		Name:                name,

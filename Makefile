@@ -1,4 +1,4 @@
-.PHONY: default build test clean
+.PHONY: default install build test lint clean
 
 BINARY ?= k8s-replicator
 

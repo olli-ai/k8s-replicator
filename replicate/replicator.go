@@ -16,7 +16,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
-// the interface to implement for each resource type
+// ReplicatorActions is the interface to implement for each resource type
 type ReplicatorActions interface {
 	// Returns the meta of a resource
 	// Probably nothing more than `&object.(*ResourceType).ObjectMeta`
@@ -32,25 +32,25 @@ type ReplicatorActions interface {
 	Delete(client kubernetes.Interface, meta interface{}) (error)
 }
 
-// the structure merging both
+// ObjectReplicator is the structure for any replicator
 type ObjectReplicator struct {
 	ReplicatorProps
 	ReplicatorActions
 }
 
-// if synched with kubernetes
+// Synced returns if synched with kubernetes
 func (r *ObjectReplicator) Synced() bool {
 	return r.namespaceController.HasSynced() && r.objectController.HasSynced()
 }
 
-// starts the replicator
+// Start starts the replicator
 func (r *ObjectReplicator) Start() {
 	log.Printf("running %s object controller", r.Name)
 	go r.namespaceController.Run(wait.NeverStop)
 	go r.objectController.Run(wait.NeverStop)
 }
 
-// init namespace store and object store
+// InitStores inits namespace store and object store
 func (r *ObjectReplicator) InitStores(lw cache.ListerWatcher, objType runtime.Object, resyncPeriod time.Duration) {
 	namespaces := r.client.CoreV1().Namespaces()
 	r.namespaceStore, r.namespaceController = newFilledInformer(
@@ -63,7 +63,7 @@ func (r *ObjectReplicator) InitStores(lw cache.ListerWatcher, objType runtime.Ob
 		&v1.Namespace{},
 		resyncPeriod,
 		cache.ResourceEventHandlerFuncs{
-			AddFunc:    r.NamespaceAdded,
+			AddFunc: r.NamespaceAdded,
 		},
 	)
 	r.objectStore, r.objectController = newFilledInformer(
@@ -80,12 +80,11 @@ func (r *ObjectReplicator) InitStores(lw cache.ListerWatcher, objType runtime.Ob
 	)
 }
 
-const CreatedResourceVersion = "k8s-replicator"
-
 // an informer that fills the store on list call
 func newFilledInformer(lw cache.ListerWatcher, objType runtime.Object, resyncPeriod time.Duration, handlers cache.ResourceEventHandler) (cache.Store, cache.Controller) {
 	var store cache.Store
 	var controller cache.Controller
+	var toAdd map[string]bool
 	store, controller = cache.NewInformer(
 		&cache.ListWatch{
 			ListFunc: func(lo metav1.ListOptions) (runtime.Object, error) {
@@ -98,18 +97,17 @@ func newFilledInformer(lw cache.ListerWatcher, objType runtime.Object, resyncPer
 				// fill up the store already, to avoid thinking other resources don't exist
 				} else {
 					copy := make([]interface{}, len(items))
+					toAdd = make(map[string]bool, len(items))
 					for index, item := range items {
-						item = item.DeepCopyObject()
-						if accessor, err := meta.Accessor(item); err != nil {
-							return object, err
-						// set a specific ResourceVersion to detect an "update" event as an "add" event
-						} else {
-							accessor.SetResourceVersion(CreatedResourceVersion)
-						}
 						copy[index] = item
+						// save which one should be added at next update
+						accessor, err := meta.Accessor(item)
+						if err != nil {
+							return object, err
+						}
+						toAdd[fmt.Sprintf("%s/%s", accessor.GetNamespace(), accessor.GetName())] = true
 					}
-					version := list.GetResourceVersion()
-					err = store.Replace(copy, version)
+					err = store.Replace(copy, list.GetResourceVersion())
 					return object, err
 				}
 			},
@@ -121,11 +119,15 @@ func newFilledInformer(lw cache.ListerWatcher, objType runtime.Object, resyncPer
 			AddFunc:    handlers.OnAdd,
 			UpdateFunc: func(old interface{}, new interface{}) {
 				// because of the store fill up, an "update" event is sent instead of an "add" event
-				if accessor, err := meta.Accessor(old); err == nil && accessor.GetResourceVersion() == CreatedResourceVersion {
-					handlers.OnAdd(new)
-				} else {
-					handlers.OnUpdate(old, new)
+				if accessor, err := meta.Accessor(old); err == nil {
+					key := fmt.Sprintf("%s/%s", accessor.GetNamespace(), accessor.GetName())
+					if toAdd[key] {
+						delete(toAdd, key)
+						handlers.OnAdd(new)
+						return
+					}
 				}
+				handlers.OnUpdate(old, new)
 			},
 			DeleteFunc: handlers.OnDelete,
 		},
@@ -133,7 +135,7 @@ func newFilledInformer(lw cache.ListerWatcher, objType runtime.Object, resyncPer
 	return store, controller
 }
 
-// Called when a namespace is seen in kubernetes
+// NamespaceAdded is called when a namespace is seen in kubernetes
 // Creates the resouces that should be replicated in that namespace
 func (r *ObjectReplicator) NamespaceAdded(object interface{}) {
 	namespace := object.(*v1.Namespace)
@@ -230,7 +232,7 @@ func (r *ObjectReplicator) replicateToNamespace(object interface{}, namespace st
 	// because if we are here, it means they already match this namespace
 }
 
-// Called when a new resource is seen in kubernetes
+// ObjectAdded is called when a new resource is seen in kubernetes
 // Checks its replication status and does the necessaey updates
 func (r *ObjectReplicator) ObjectAdded(object interface{}) {
 	meta := r.GetMeta(object)
@@ -698,7 +700,7 @@ func (r *ObjectReplicator) updateDependents(object interface{}, replicas []strin
 	return nil
 }
 
-// Called when a resource is updated
+// ObjectDeleted is called when a resource is updated
 // Checks if a target should be cleared / deleted, or if it should be replaced by a replication
 func (r *ObjectReplicator) ObjectDeleted(object interface{}) {
 	meta := r.GetMeta(object)
