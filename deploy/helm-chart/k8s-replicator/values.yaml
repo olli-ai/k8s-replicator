@@ -4,7 +4,7 @@
 
 image:
   repository: olliai/k8s-replicator
-  tag:
+  tag: # same as chart version
   pullPolicy: IfNotPresent
 
 nameOverride: ""
@@ -29,3 +29,33 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+deployment:
+  # specify annotations for the deployemnt
+  annotations: {}
+
+pod:
+  # specify annotations for the pod
+  annotations: {}
+
+serviceAccount:
+  # Specifies whether a ServiceAccount should be created
+  create: true
+
+  # The name of the ServiceAccount to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name:
+
+# not configurable on install
+xxx:
+  # add replicable resources here
+  resources:
+    configmap:
+      apiGroup: ""
+      resource: configmaps
+    secret:
+      apiGroup: ""
+      resource: secrets
+    endpoints:
+      apiGroup: ""
+      resource: endpoints

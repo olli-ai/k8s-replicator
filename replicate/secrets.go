@@ -85,10 +85,6 @@ func (*secretActions) Install(client kubernetes.Interface, meta *metav1.ObjectMe
 	// create a new secret
 	secret := v1.Secret{
 		Type: sourceSecret.Type,
-		TypeMeta: metav1.TypeMeta{
-			Kind:       sourceSecret.Kind,
-			APIVersion: sourceSecret.APIVersion,
-		},
 		ObjectMeta: *meta,
 	}
 	// if there is data

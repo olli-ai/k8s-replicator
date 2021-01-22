@@ -1,16 +1,52 @@
+{{- if .Values.serviceAccount.create -}}
+{{- $all := false -}}
+{{- $names := list -}}
+{{- if kindIs "string" .Values.runReplicators -}}
+  {{- $all = eq "all" (lower .Values.runReplicators) -}}
+  {{- $names = splitList "," .Values.runReplicators -}}
+{{- else if kindIs "slice" .Values.runReplicators -}}
+  {{- $names = .Values.runReplicators -}}
+{{- end -}}
+{{- if not $all -}}
+  {{- $resources := .Values.xxx.resources -}}
+  {{- $runReplicators := .Values.runReplicators -}}
+  {{- $any := false -}}
+  {{- range $i, $n := $names -}}
+    {{- $n = $n | trim | lower -}}
+    {{- if $n -}}
+      {{- $any = true -}}
+      {{- if not (hasKey $resources $n) -}}
+        {{- printf "unknown runReplicators '%s'; 'all' or '%s' available" $runReplicators (keys $resources | join "', '") | fail -}}{{/*'*/}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if not $any -}}
+    {{- fail "empty runReplicators provided" -}}
+  {{- end -}}
+{{- end -}}
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: {{ include "k8s-replicator.fullname" . }}
+  name: {{ default (include "k8s-replicator.fullname" .) .Values.serviceAccount.name }}
   labels:
     app.kubernetes.io/name: {{ include "k8s-replicator.name" . }}
     helm.sh/chart: {{ include "k8s-replicator.chart" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
 rules:
-- apiGroups: [""]
-  resources: ["secrets", "configmaps"]
+{{- range $name, $resource := .Values.xxx.resources }}
+  {{- $ok := $all }}
+  {{- range $i, $n := $names }}
+    {{- if eq $name ($n | trim | lower) }}
+      {{- $ok = true }}
+    {{- end }}
+  {{- end }}
+  {{- if $ok }}
+- apiGroups: [{{ $resource.apiGroup | quote }}]
+  resources: [{{ $resource.resource | quote }}]
   verbs: ["get", "watch", "list", "create", "update", "delete"]
+  {{- end }}
+{{- end }}
 - apiGroups: [""]
   resources: ["namespaces"]
   verbs: ["get", "watch", "list"]
@@ -42,3 +78,4 @@ metadata:
     helm.sh/chart: {{ include "k8s-replicator.chart" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end -}}

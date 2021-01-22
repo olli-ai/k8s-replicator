@@ -92,13 +92,9 @@ func (*configMapActions) Clear(client kubernetes.Interface, object interface{}, 
 }
 
 func (*configMapActions) Install(client kubernetes.Interface, meta *metav1.ObjectMeta, sourceObject interface{}, dataObject interface{}) (interface{}, error) {
-	sourceConfigMap := sourceObject.(*v1.ConfigMap)
+	// sourceConfigMap := sourceObject.(*v1.ConfigMap)
 	// create a new configMap
 	configMap := v1.ConfigMap{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       sourceConfigMap.Kind,
-			APIVersion: sourceConfigMap.APIVersion,
-		},
 		ObjectMeta: *meta,
 	}
 	// if there is data

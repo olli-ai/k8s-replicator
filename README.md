@@ -275,18 +275,27 @@ This way, the source of the secret (external secret, helm value, or random) can 
 
 ## Configuration
 
-| Helm parameter    | Argument             | Description                                                                                                            | Default                                                    |
-|-------------------|----------------------|------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------|
-| allowAll          | --allow-all          | Implicitly allow to copy from any secret or configMap                                                                  | `false`                                                    |
-| ignoreUnknown     | --ignore-unknown     | Unknown annotations with the same prefix do not raise an error                                                         | `false`                                                    |
-| resyncPeriod      | --resync-period      | How often the kubernetes informers should resynchronize                                                                | `30m`                                                      |
-| runReplicators    | --run-replicators    | The replicators to run, `all` or a comma-separated list of case-insensitive replicators (`secret,configMap`)           | `all`                                                      |
-| annotationsPrefix | --annotations-prefix | The prefix to use on every annotations                                                                                 | `k8s-replicator`                                           |
-| createWithLabels  | --create-with-labels | A comma-separated list of labels and values to apply to created secrets and configMaps (`label1=value1,label2=value2`) | `app.kubernetes.io/managed-by={.Values.annotationsPrefix}` |
-| nameOverride      |                      | Overrides the name used in the label selector and the default name of the resources                                    | `{.Chart.Name}`                                            |
-| fullnameOverride  |                      | Overrides the name of the resources                                                                                    | `{.Release.Name}-{.Values.nameOverride}`                   |
-|                   | --status-address     | The address for the status HTTP endpoint                                                                               | `:9102`                                                    |
-|                   | --kube-config        | The path to Kubernetes config file                                                                                     | cluster config                                             |
+| Helm parameter           | Argument               | Description                                                                                                            | Default                                                    |
+|--------------------------|------------------------|------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------|
+| `allowAll`               | `--allow-all`          | Implicitly allow to copy from any secret or configMap                                                                  | `false`                                                    |
+| `ignoreUnknown`          | `--ignore-unknown`     | Unknown annotations with the same prefix do not raise an error                                                         | `false`                                                    |
+| `resyncPeriod`           | `--resync-period`      | How often the kubernetes informers should resynchronize                                                                | `30m`                                                      |
+| `runReplicators`         | `--run-replicators`    | The replicators to run, `all` or a comma-separated list of case-insensitive replicators (`secret,configMap,endpoints`) | `all`                                                      |
+| `annotationsPrefix`      | `--annotations-prefix` | The prefix to use on every annotations                                                                                 | `k8s-replicator`                                           |
+| `createWithLabels`       | `--create-with-labels` | A comma-separated list of labels and values to apply to created secrets and configMaps (`label1=value1,label2=value2`) | `app.kubernetes.io/managed-by={.Values.annotationsPrefix}` |
+|                          | `--status-address`     | The address for the status HTTP endpoint                                                                               | `:9102`                                                    |
+|                          | `--kube-config`        | The path to Kubernetes config file                                                                                     | cluster config                                             |
+| `image.repository`       |                        | Provisioner image                                                                                                      | `olliai/glusterfs-client-provisioner`                      |
+| `image.tag`              |                        | Version of provisioner image                                                                                           | Chart's version                                            |
+| `image.pullPolicy`       |                        | Image pull policy                                                                                                      | `IfNotPresent`                                             |
+| `nameOverride`           |                        | Overrides the name used in the label selector and the default name of the resources                                    | `{.Chart.Name}`                                            |
+| `fullnameOverride`       |                        | Overrides the name of the resources                                                                                    | `{.Release.Name}-{.Values.nameOverride}`                   |
+| `serviceAccount.create`  |                        | Creates a service account with necessary roles                                                                         | `true`                                                     |
+| `serviceAccount.name`    |                        | Name of an existing service account to use                                                                             |                                                            |
+| `deployment.annotations` |                        | Annotations for the deployment                                                                                         | `{}`                                                       |
+| `pod.annotations`        |                        | Annotations for the pod                                                                                                | `{}`                                                       |
+
+You can pass several replicators using `--set runReplicators='{configMap,secret}'`
 
 ## Replicating more resources
 
@@ -360,9 +369,8 @@ func (*myActions) Clear(client kubernetes.Interface, object interface{}, annotat
 }
 
 func (*myActions) Install(client kubernetes.Interface, meta *metav1.ObjectMeta, sourceObject interface{}, dataObject interface{}) (interface{}, error) {
-    mySource := sourceObject.(*MyResource)
+    // mySource := sourceObject.(*MyResource)
     myObject = MyResource{
-        TypeMeta: mySource.TypeMeta,
         ObjectMeta: *meta,
     }
 
@@ -406,8 +414,7 @@ func (*myActions) Delete(client kubernetes.Interface, object interface{}) error 
 And add the replicator function in `main.go`
 ```golang
 var newReplicatorFuncs map[string]newReplicatorFunc = map[string]newReplicatorFunc{
-    "configmap":  replicate.NewConfigMapReplicator,
-    "secret":     replicate.NewSecretReplicator,
+    // [...]
     "myResource": mypackage.NewMyReplicator,
 }
 ```
