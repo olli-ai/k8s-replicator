@@ -4,3 +4,16 @@ name: k8s-replicator
 description: Controller for replicating secrets and configMaps across namespaces, and help with randomly generated passwords deployed with helm
 version: 1.1.1
 url: https://github.com/olli-ai/k8s-replicator
+home: https://github.com/olli-ai/k8s-replicator
+sources:
+- https://github.com/olli-ai/k8s-replicator
+keywords:
+- replicate
+- replicator
+- secret
+- configmap
+- random
+- password
+maintainers:
+- name: aure-olli
+  email: aure@olli-ai.com
