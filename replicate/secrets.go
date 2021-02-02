@@ -1,7 +1,9 @@
 package replicate
 
 import (
+	"crypto/rand"
 	"log"
+	"math/big"
 	"time"
 
 	"k8s.io/api/core/v1"
@@ -34,6 +36,55 @@ type secretActions struct {}
 
 func (*secretActions) GetMeta(object interface{}) *metav1.ObjectMeta {
 	return &object.(*v1.Secret).ObjectMeta
+}
+
+const passwordChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+const passwordLength = 128
+
+type emptySecretFuncsType = map[v1.SecretType] func() (map[string]string, error)
+// functions for generating empty data for specific secret types
+var emptySecretFuncs emptySecretFuncsType = emptySecretFuncsType{
+	v1.SecretTypeDockercfg: func() (map[string]string, error) {
+		return map[string]string{
+			// This field is checked to be JSON
+			v1.DockerConfigKey: "{}",
+		}, nil
+	},
+	v1.SecretTypeDockerConfigJson: func() (map[string]string, error) {
+		return map[string]string{
+			// This field is checked to be JSON
+			v1.DockerConfigJsonKey: "{}",
+		}, nil
+	},
+	v1.SecretTypeBasicAuth: func() (map[string]string, error) {
+		// generate a long random password instead of an empty one for safety
+		max := big.NewInt(int64(len(passwordChars)))
+		buf := make([]byte, passwordLength)
+		for i := 0; i < passwordLength; i++ {
+			char, err := rand.Int(rand.Reader, max)
+			if err != nil {
+				return nil, err
+			}
+			buf[i] = passwordChars[char.Int64()]
+		}
+		return map[string]string{
+			v1.BasicAuthUsernameKey: "",
+			// could use an empty password, safer to use a long random one
+			v1.BasicAuthPasswordKey: string(buf),
+		}, nil
+	},
+	v1.SecretTypeSSHAuth: func() (map[string]string, error) {
+		return map[string]string{
+			// this field is checked to be non empty
+			v1.SSHAuthPrivateKey: "empty",
+		}, nil
+	},
+	v1.SecretTypeTLS: func() (map[string]string, error) {
+		return map[string]string{
+			v1.TLSCertKey: "",
+			v1.TLSPrivateKeyKey: "",
+		}, nil
+	},
 }
 
 func (*secretActions) Update(client kubernetes.Interface, object interface{}, sourceObject interface{}, annotations map[string]string) (interface{}, error) {
@@ -70,6 +121,13 @@ func (*secretActions) Clear(client kubernetes.Interface, object interface{}, ann
 	secret.Annotations = annotations
 	// clear the data
 	secret.Data = nil
+	if emptyFunc, ok := emptySecretFuncs[secret.Type]; ok {
+		var err error
+		secret.StringData, err = emptyFunc()
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	log.Printf("clearing secret %s/%s", secret.Namespace, secret.Name)
 	// update the secret
@@ -98,6 +156,12 @@ func (*secretActions) Install(client kubernetes.Interface, meta *metav1.ObjectMe
 				copy(newValue, value)
 				secret.Data[key] = newValue
 			}
+		}
+	} else if emptyFunc, ok := emptySecretFuncs[secret.Type]; ok {
+		var err error
+		secret.StringData, err = emptyFunc()
+		if err != nil {
+			return nil, err
 		}
 	}
 
