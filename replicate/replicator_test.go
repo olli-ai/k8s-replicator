@@ -1629,7 +1629,7 @@ func TestReplicateToFrom_scenario(t *testing.T) {
 		Action: "install",
 		Object: testObject{
 			Type: "1",
-			Data: "",
+			Data: "1",
 			Meta: metav1.ObjectMeta{
 				Name: "target",
 				Namespace: "target-ns",
@@ -1714,7 +1714,7 @@ func TestReplicateToFrom_annotations(t *testing.T) {
 		Action: "install",
 		Object: testObject{
 			Type: "0",
-			Data: "",
+			Data: "0",
 			Meta: metav1.ObjectMeta{
 				Name: "target",
 				Namespace: "target-ns",
@@ -1740,7 +1740,7 @@ func TestReplicateToFrom_annotations(t *testing.T) {
 		Action: "install",
 		Object: testObject{
 			Type: "2",
-			Data: "",
+			Data: "0",
 			Meta: metav1.ObjectMeta{
 				Name: "target",
 				Namespace: "target-ns",
@@ -1765,7 +1765,7 @@ func TestReplicateToFrom_annotations(t *testing.T) {
 		Action: "install",
 		Object: testObject{
 			Type: "4",
-			Data: "",
+			Data: "0",
 			Meta: metav1.ObjectMeta{
 				Name: "target",
 				Namespace: "target-ns",

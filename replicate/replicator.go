@@ -293,6 +293,7 @@ Targets:
 		r.updateDependents(object, replicas)
 	}
 	// this object was replicated by another, update it
+	var byObject interface{}
 	if val, ok := meta.Annotations[ReplicatedByAnnotation]; ok {
 		log.Printf("%s %s is replicated by %s", r.Name, key, val)
 		sourceObject, sourceMeta, exists, err := r.getFromStore(val)
@@ -329,6 +330,7 @@ Targets:
 			meta = m
 			targets = nil
 			targetPatterns = nil
+			byObject = sourceObject
 		}
 	}
 	// this object is replicated to other locations
@@ -410,7 +412,7 @@ Targets:
 		// the source does not exist anymore/yet, clear the data of the target
 		} else if !exists {
 			log.Printf("source %s %s deleted: clearing target %s", r.Name, val, key)
-			r.doClearObject(object)
+			r.doClearObject(object, byObject)
 		// update the target
 		} else {
 			r.replicateObject(object, sourceObject)
@@ -426,7 +428,8 @@ func (r *ObjectReplicator) replicateObject(object interface{}, sourceObject  int
 	if ok, nok, err := r.isReplicationAllowed(meta, sourceMeta); ok {
 	} else if nok {
 		log.Printf("replication of %s %s/%s is not allowed: %s", r.Name, meta.Namespace, meta.Name, err)
-		return r.doClearObject(object)
+		_, err := r.clearObject(object, sourceObject)
+		return err
 	} else {
 		log.Printf("replication of %s %s/%s is cancelled: %s", r.Name, meta.Namespace, meta.Name, err)
 		return err
@@ -531,6 +534,11 @@ func (r *ObjectReplicator) installObject(target string, targetObject interface{}
 		}
 
 		log.Printf("installing %s %s/%s: updating replicate-from annotations", r.Name, copyMeta.Namespace, copyMeta.Name)
+		// if the target doesn't exist yet, use the data from the source
+		// to avoid parsing problem with specific secret types
+		if targetObject == nil {
+			targetObject = sourceObject
+		}
 		// install it, but keeps the original data
 		newObject, err := r.Install(r.client, &copyMeta, sourceObject, targetObject)
 		// update the object store in advance, to avoid being disturbed later
@@ -727,7 +735,9 @@ func (r *ObjectReplicator) ObjectDeleted(object interface{}) {
 			}
 			previous = dependentKey
 
-			if ok, _ := r.clearObject(dependentKey, object); ok {
+			if targetObject, _, err := r.requireFromStore(dependentKey); err != nil {
+				log.Printf("could not load dependent %s %s: %s", r.Name, dependentKey, err)
+			} else if ok, _ := r.clearObject(targetObject, object); ok {
 				updatedReplicas = append(updatedReplicas, dependentKey)
 			}
 		}
@@ -784,25 +794,48 @@ func (r *ObjectReplicator) ObjectDeleted(object interface{}) {
 }
 
 // Clear a resource's data, because its source has been deleted or doesn't allow replication anymore
-func (r *ObjectReplicator) clearObject(key string, sourceObject interface{}) (bool, error) {
+func (r *ObjectReplicator) clearObject(object, sourceObject interface{}) (bool, error) {
+	meta := r.GetMeta(object)
 	sourceMeta := r.GetMeta(sourceObject)
 
-	targetObject, targetMeta, err := r.requireFromStore(key)
-	if err != nil {
-		log.Printf("could not load dependent %s %s: %s", r.Name, key, err)
-		return false, err
-	}
-
-	if !annotationRefersTo(targetMeta, ReplicateFromAnnotation, sourceMeta) {
-		log.Printf("annotation of dependent %s %s changed", r.Name, key)
+	if !annotationRefersTo(meta, ReplicateFromAnnotation, sourceMeta) {
+		log.Printf("annotation of dependent %s %s/%s changed", r.Name, meta.Namespace, meta.Name)
 		return false, nil
 	}
 
-	return true, r.doClearObject(targetObject)
+	var byObject interface{}
+	if val, ok := meta.Annotations[ReplicatedByAnnotation]; ok {
+		log.Printf("%s %s/%s is replicated by %s", r.Name, meta.Namespace, meta.Name, val)
+		sourceObject, sourceMeta, exists, err := r.getFromStore(val)
+
+		if err != nil {
+			log.Printf("could not get %s %s: %s", r.Name, val, err)
+			return false, err
+		// the source has been deleted, so should this object be
+		} else if !exists {
+			log.Printf("source %s %s deleted: deleting target %s/%s", r.Name, val, meta.Namespace, meta.Name)
+
+		} else if ok, err := r.isReplicatedTo(sourceMeta, meta); err != nil {
+			log.Printf("could not parse %s %s: %s", r.Name, val, err)
+			return false, err
+		// the source annotations have changed, this replication is deleted
+		} else if !ok {
+			log.Printf("source %s %s is not replicated to %s/%s: deleting target", r.Name, val, meta.Namespace, meta.Name)
+			exists = false
+		}
+		// no source, delete it
+		if !exists {
+			return false, r.doDeleteObject(object)
+		}
+		// continue
+		byObject = sourceObject
+	}
+
+	return true, r.doClearObject(object, byObject)
 }
 
 // Actually clear the object, no further check needed
-func (r *ObjectReplicator) doClearObject(object interface{}) error {
+func (r *ObjectReplicator) doClearObject(object, byObject interface{}) error {
 	meta := r.GetMeta(object)
 
 	if _, ok := meta.Annotations[ReplicatedFromVersionAnnotation]; !ok {
@@ -818,7 +851,15 @@ func (r *ObjectReplicator) doClearObject(object interface{}) error {
 	delete(annotations, ReplicatedFromVersionAnnotation)
 	delete(annotations, ReplicateOnceVersionAnnotation)
 
-	newObject, err := r.Clear(r.client, object, annotations)
+	var newObject interface{}
+	var err error
+	// this object wasn't created by the replicator, just clear it
+	if byObject == nil {
+		newObject, err = r.Clear(r.client, object, annotations)
+	// this object was created by the replicator, replace its data with data // from the replication source to avoid errors from specific secret types
+	} else {
+		newObject, err = r.Update(r.client, object, byObject, annotations)
+	}
 	// update the object store in advance, to avoid being disturbed later
 	if err == nil {
 		err = r.objectStore.Update(newObject)
