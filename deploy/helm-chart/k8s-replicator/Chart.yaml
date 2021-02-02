@@ -1,8 +1,8 @@
 apiVersion: v1
-appVersion: v1.2.0a
+appVersion: v1.2.0-a
 name: k8s-replicator
 description: Controller for replicating secrets and configMaps across namespaces, and help with randomly generated passwords deployed with helm
-version: 1.2.0a
+version: 1.2.0-a
 url: https://github.com/olli-ai/k8s-replicator
 home: https://github.com/olli-ai/k8s-replicator
 sources:
