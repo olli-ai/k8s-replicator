@@ -79,6 +79,14 @@ This is especially useful because the generated secret or configMap is not manag
 
 The generated secret or configMap is deleted if its creator is deleted, and cleared if its source is deleted or does not allow replication.
 
+### Special secret types
+
+Some special secret types come with constraints: existing keys and specific formats. When clearing a secret, `k8s-replicator` will conform to those constraints with minimal values. In particular:
+- `kubernetes.io/basic-auth`: cleared with an empty user `""`, but a long random password for security.
+- `kubernetes.io/ssh-auth`: cleared with `"empty"` as ssh private key (`""` not allowed).
+- `kubernetes.io/service-account-token`: not handled, it is managed by kubernetes so replicating it may be a bad idea.
+- `bootstrap.kubernetes.io/token`: not handled, it is an internal secret type of kubernetes.
+
 ### Handling errors
 
 The state of the replicated secrets and configMaps and is stored in their annotations, so `k8s-replicator` is resilient to restarts and kubernetes errors, and won't perform redundant actions. `--resync-period` configures how often the list of resources is reloaded, which forces the replicator to check the state of the cluster. All updates / creations / deletions are performed against the `ResourceVersion`, so any outdated update will fail.
