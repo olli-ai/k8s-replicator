@@ -1,6 +1,8 @@
 package replicate
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -545,6 +547,171 @@ func TestSecret_Delete(t *testing.T) {
 	// TODO: test delete option (impossible with the current implementation of fake client)
 	_, err = secrets.Get("test-clear", metav1.GetOptions{})
 	require.Error(t, err)
+}
+
+func decodeSecret(t *testing.T, secret *v1.Secret, name string) (map[string]string, map[string]bool) {
+	data := map[string]string{}
+	keys := map[string]bool{}
+	for key, value := range secret.StringData {
+		data[key] = value
+		keys[key] = true
+	}
+	for key, value := range secret.Data {
+		assert.NotContainsf(t, data, key, "already exists %s", name)
+		buff := make([]byte, base64.StdEncoding.DecodedLen(len(value)))
+		length, err := base64.StdEncoding.Decode(buff, value)
+		assert.NoError(t, err, name)
+		data[key] = string(buff[:length])
+		keys[key] = true
+	}
+	return data, keys
+}
+
+func TestSecret_typesEmpty(t *testing.T) {
+	example := []struct{
+		name   string
+		stype  v1.SecretType
+		keys   map[string]bool
+		values map[string]string
+		check  func(t *testing.T, data map[string]string)
+	}{{
+		"opaque",
+		v1.SecretTypeOpaque,
+		map[string]bool{},
+		nil,
+		nil,
+	}, {
+		"unknown",
+		v1.SecretType("unknown"),
+		map[string]bool{},
+		nil,
+		nil,
+	}, {
+		".dockercfg",
+		v1.SecretTypeDockercfg,
+		map[string]bool{v1.DockerConfigKey: true},
+		nil,
+		func(t *testing.T, data map[string]string) {
+			err := json.Unmarshal([]byte(data[v1.DockerConfigKey]), &map[string]interface{}{})
+			assert.NoError(t, err, "json .dockercfg")
+		},
+	}, {
+		".docker/config.json",
+		v1.SecretTypeDockerConfigJson,
+		map[string]bool{v1.DockerConfigJsonKey: true},
+		nil,
+		func(t *testing.T, data map[string]string) {
+			err := json.Unmarshal([]byte(data[v1.DockerConfigJsonKey]), &map[string]interface{}{})
+			assert.NoError(t, err, "json .docker/config.json")
+		},
+	}, {
+		"basic-auth",
+		v1.SecretTypeBasicAuth,
+		map[string]bool{v1.BasicAuthUsernameKey: true, v1.BasicAuthPasswordKey: true},
+		map[string]string{v1.BasicAuthUsernameKey: ""},
+		func(t *testing.T, data map[string]string) {
+			assert.GreaterOrEqual(t, len(data[v1.BasicAuthPasswordKey]), 100, "long password basic-auth")
+		},
+	}, {
+		"ssh-auth",
+		v1.SecretTypeSSHAuth,
+		map[string]bool{v1.SSHAuthPrivateKey: true},
+		nil,
+		func(t *testing.T, data map[string]string) {
+			assert.NotEqual(t, "", data[v1.SSHAuthPrivateKey], "not empty key ssh-auth")
+			assert.LessOrEqual(t, len(data[v1.SSHAuthPrivateKey]), 10, "no key ssh-auth")
+		},
+	}, {
+		"tls",
+		v1.SecretTypeTLS,
+		map[string]bool{v1.TLSCertKey: true, v1.TLSPrivateKeyKey: true},
+		map[string]string{v1.TLSCertKey: "", v1.TLSPrivateKeyKey: ""},
+		nil,
+	}}
+	for _, example := range example {
+		replicator, watcher := createReplicator(_secretActions, "test-ns")
+		require.Equalf(t, 0, len(watcher.Actions), "len(actions) %s", example.name)
+		secrets := replicator.client.CoreV1().Secrets("test-ns")
+
+		secret1, err := secrets.Create(&v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "test-ns",
+				Name: "secret1",
+			},
+			Type: example.stype,
+			Data: MB{
+				"test64": []byte("dGVzdDY0"),
+			},
+		})
+		require.NoError(t, err, example.name)
+		require.Equalf(t, 1, len(watcher.Actions), "len(actions) %s", example.name)
+
+		update1, err := _secretActions.Clear(replicator.client, secret1, M{})
+		require.NoError(t, err, example.name)
+		require.Equalf(t, 2, len(watcher.Actions), "len(actions) %s", example.name)
+
+		stored1, err := secrets.Get("secret1", metav1.GetOptions{})
+		require.NoError(t, err, example.name)
+		require.Equalf(t, 3, len(watcher.Actions), "len(actions) %s", example.name)
+		assert.Equal(t, update1, stored1, example.name)
+
+		data1, keys1 := decodeSecret(t, stored1, example.name)
+		if example.keys != nil {
+			assert.Equalf(t, example.keys, keys1, "keys %s", example.name)
+		}
+		for key, value := range example.values {
+			if assert.Containsf(t, data1, key, "data %s", example.name) {
+				assert.Equalf(t, value, data1[key], "data %s", example.name)
+			}
+		}
+		if example.check != nil {
+			example.check(t, data1)
+		}
+
+		secret2, err := secrets.Create(&v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "test-ns",
+				Name: "secret2",
+			},
+			Type: example.stype,
+			Data: MB{
+				"test64": []byte("dGVzdDY0"),
+			},
+		})
+		require.NoError(t, err, example.name)
+		require.Equalf(t, 4, len(watcher.Actions), "len(actions) %s", example.name)
+
+		meta3 := &metav1.ObjectMeta{
+			Namespace: "test-ns",
+			Name: "secret3",
+		}
+		update3, err := _secretActions.Install(replicator.client, meta3, secret2, nil)
+		require.NoError(t, err, example.name)
+		require.Equalf(t, 5, len(watcher.Actions), "len(actions) %s", example.name)
+
+		stored3, err := secrets.Get(meta3.Name, metav1.GetOptions{})
+		require.NoError(t, err, example.name)
+		require.Equalf(t, 6, len(watcher.Actions), "len(actions) %s", example.name)
+		assert.Equal(t, update3, stored3)
+
+		data3, keys3 := decodeSecret(t, stored3, example.name)
+		if example.keys != nil {
+			assert.Equalf(t, example.keys, keys3, "keys %s", example.name)
+		}
+		for key, value := range example.values {
+			if assert.Containsf(t, data3, key, "data %s", example.name) {
+				assert.Equalf(t, value, data3[key], "data %s", example.name)
+			}
+		}
+		if example.check != nil {
+			example.check(t, data3)
+		}
+
+		if example.stype == v1.SecretTypeBasicAuth {
+			assert.NotEqual(t, data1[v1.BasicAuthPasswordKey], data3[v1.BasicAuthPasswordKey], "different password basic-auth")
+		}
+	}
+
 }
 
 func TestNewSecretReplicator(t *testing.T) {
