@@ -243,6 +243,71 @@ func Test_isReplicationAllowed(t *testing.T) {
 		"number-123",
 		true,
 		false,
+	}, {
+		"from error",
+		false,
+		M{
+			ReplicationAllowedAnnotation:    "true",
+			ReplicateFromAnnotation:         "other-ns/other",
+			ReplicatedFromAllowedAnnotation: "(((",
+		},
+		"target-ns",
+		false,
+		false,
+	}, {
+		"from ignored",
+		false,
+		M{
+			ReplicationAllowedAnnotation:    "true",
+			ReplicatedFromAllowedAnnotation: "(((",
+		},
+		"target-ns",
+		true,
+		false,
+	}, {
+		"from default",
+		false,
+		M{
+			ReplicationAllowedAnnotation: "true",
+			ReplicateFromAnnotation:      "other-ns/other",
+		},
+		"target-ns",
+		false,
+		true,
+	}, {
+		"from allowed ns",
+		false,
+		M{
+			ReplicationAllowedAnnotation:    "true",
+			ReplicateFromAnnotation:         "other-ns/other",
+			ReplicatedFromAllowedAnnotation: "one-ns,target-ns,two-ns",
+		},
+		"target-ns",
+		true,
+		false,
+	}, {
+		"from disallowed ns",
+		false,
+		M{
+			ReplicationAllowedAnnotation:    "true",
+			ReplicateFromAnnotation:         "other-ns/other",
+			ReplicatedFromAllowedAnnotation: "one-ns,two-ns",
+		},
+		"target-ns",
+		false,
+		true,
+	}, {
+		"replication loop",
+		false,
+		M{
+			ReplicationAllowedAnnotation:    "true",
+			ReplicateFromAnnotation:         "other-ns/other",
+			ReplicatedFromOriginAnnotation:  "target-ns/target",
+			ReplicatedFromAllowedAnnotation: ".*",
+		},
+		"target-ns",
+		false,
+		false,
 	}}
 	for _, example := range examples {
 		props := &ReplicatorProps{
@@ -268,6 +333,176 @@ func Test_isReplicationAllowed(t *testing.T) {
 		} else {
 			assert.Error(t, err, example.name)
 		}
+	}
+}
+
+func Test_getReplicationAnnotations(t *testing.T) {
+	type M = map[string]string
+	examples := []struct{
+		name              string
+		sourceAnnotations map[string]string
+		targetAnnotations map[string]string
+		expected          map[string]string
+	}{{
+		"No annotation",
+		M{},
+		M{ReplicateFromAnnotation: "source-ns/sorce"},
+		M{
+			ReplicateFromAnnotation: "source-ns/sorce",
+			ReplicatedFromOriginAnnotation: "source-ns/source",
+			ReplicatedFromAllowedAnnotation: ".*",
+		},
+	}, {
+		"replicate from",
+		M{ReplicateFromAnnotation: "other-ns/other"},
+		M{ReplicateFromAnnotation: "source-ns/sorce"},
+		M{
+			ReplicateFromAnnotation: "source-ns/sorce",
+			ReplicatedFromOriginAnnotation: "source-ns/source",
+			ReplicatedFromAllowedAnnotation: "-",
+		},
+	}, {
+		"origin annotation",
+		M{
+			ReplicateFromAnnotation: "other-ns/other",
+			ReplicatedFromOriginAnnotation: "any-ns/any",
+		},
+		M{ReplicateFromAnnotation: "source-ns/sorce"},
+		M{
+			ReplicateFromAnnotation: "source-ns/sorce",
+			ReplicatedFromOriginAnnotation: "any-ns/any",
+			ReplicatedFromAllowedAnnotation: "-",
+		},
+	}, {
+		"once with replicate from",
+		M{ReplicateFromAnnotation: "other-ns/other"},
+		M{
+			ReplicateFromAnnotation: "source-ns/sorce",
+			ReplicateOnceAnnotation: "true",
+		},
+		M{
+			ReplicateFromAnnotation: "source-ns/sorce",
+			ReplicateOnceAnnotation: "true",
+			ReplicatedFromAllowedAnnotation: "-",
+		},
+	}, {
+		"once with origin annotation",
+		M{
+			ReplicateFromAnnotation: "other-ns/other",
+			ReplicatedFromOriginAnnotation: "any-ns/any",
+		},
+		M{
+			ReplicateFromAnnotation: "source-ns/sorce",
+			ReplicateOnceAnnotation: "true",
+		},
+		M{
+			ReplicateFromAnnotation: "source-ns/sorce",
+			ReplicateOnceAnnotation: "true",
+			ReplicatedFromAllowedAnnotation: "-",
+		},
+	}, {
+		"once false",
+		M{ReplicateFromAnnotation: "other-ns/other"},
+		M{
+			ReplicateFromAnnotation: "source-ns/sorce",
+			ReplicateOnceAnnotation: "false",
+		},
+		M{
+			ReplicateFromAnnotation: "source-ns/sorce",
+			ReplicateOnceAnnotation: "false",
+			ReplicatedFromOriginAnnotation: "source-ns/source",
+			ReplicatedFromAllowedAnnotation: "-",
+		},
+	}, {
+		"once false",
+		M{ReplicateFromAnnotation: "other-ns/other"},
+		M{
+			ReplicateFromAnnotation: "source-ns/sorce",
+			ReplicateOnceAnnotation: "false",
+		},
+		M{
+			ReplicateFromAnnotation: "source-ns/sorce",
+			ReplicateOnceAnnotation: "false",
+			ReplicatedFromOriginAnnotation: "source-ns/source",
+			ReplicatedFromAllowedAnnotation: "-",
+		},
+	}, {
+		"allowed namespaces",
+		M{ReplicationAllowedNsAnnotation: "test-1,test-2"},
+		M{ReplicateFromAnnotation: "source-ns/sorce"},
+		M{
+			ReplicateFromAnnotation: "source-ns/sorce",
+			ReplicatedFromOriginAnnotation: "source-ns/source",
+			ReplicatedFromAllowedAnnotation: "test-1,test-2",
+		},
+	}, {
+		"from allowed",
+		M{
+			ReplicateFromAnnotation: "other-ns/other",
+			ReplicatedFromAllowedAnnotation: "test-2,test-3",
+		},
+		M{ReplicateFromAnnotation: "source-ns/sorce"},
+		M{
+			ReplicateFromAnnotation: "source-ns/sorce",
+			ReplicatedFromOriginAnnotation: "source-ns/source",
+			ReplicatedFromAllowedAnnotation: "test-2,test-3",
+		},
+	}, {
+		"merge both allowed",
+		M{
+			ReplicationAllowedNsAnnotation: "test-1,test-2",
+			ReplicateFromAnnotation: "other-ns/other",
+			ReplicatedFromAllowedAnnotation: "test-2,test-3",
+		},
+		M{ReplicateFromAnnotation: "source-ns/sorce"},
+		M{
+			ReplicateFromAnnotation: "source-ns/sorce",
+			ReplicatedFromOriginAnnotation: "source-ns/source",
+			ReplicatedFromAllowedAnnotation: "test-2",
+		},
+	}, {
+		"unmergeable allowed",
+		M{
+			ReplicationAllowedNsAnnotation: "test-1,test-2",
+			ReplicateFromAnnotation: "other-ns/other",
+			ReplicatedFromAllowedAnnotation: "test-3,test-4",
+		},
+		M{ReplicateFromAnnotation: "source-ns/sorce"},
+		M{
+			ReplicateFromAnnotation: "source-ns/sorce",
+			ReplicatedFromOriginAnnotation: "source-ns/source",
+			ReplicatedFromAllowedAnnotation: "-",
+		},
+	}, {
+		"merge with patterns",
+		M{
+			ReplicationAllowedNsAnnotation: "test-1,.*-2,test-3,*-3,test-4",
+			ReplicateFromAnnotation: "other-ns/other",
+			ReplicatedFromAllowedAnnotation: "test-2,.*-4,test-5,*-5",
+		},
+		M{ReplicateFromAnnotation: "source-ns/sorce"},
+		M{
+			ReplicateFromAnnotation: "source-ns/sorce",
+			ReplicatedFromOriginAnnotation: "source-ns/source",
+			ReplicatedFromAllowedAnnotation: "test-2,test-4",
+		},
+	}}
+	for _, example := range examples {
+		props := &ReplicatorProps{
+			Name: "test",
+		}
+		target := &metav1.ObjectMeta{
+			Name:        "target",
+			Namespace:   "target-ns",
+			Annotations: example.targetAnnotations,
+		}
+		source := &metav1.ObjectMeta{
+			Name:        "source",
+			Namespace:   "source-ns",
+			Annotations: example.sourceAnnotations,
+		}
+		annotations := props.getReplicationAnnotations(target, source)
+		assert.Equal(t, example.expected, annotations, example.name)
 	}
 }
 
@@ -660,7 +895,7 @@ func Test_isReplicatedTo(t *testing.T) {
 		replicated      bool
 		error           bool
 	}{{
-		"no annotaion",
+		"no annotation",
 		nil,
 		"target-ns",
 		"target",

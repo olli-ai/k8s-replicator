@@ -22,10 +22,14 @@ var (
 	ReplicatedByAnnotation          = "replicated-by"
 	// ReplicatedFromVersionAnnotation stores the resource version of the source when replicated to this object
 	ReplicatedFromVersionAnnotation = "replicated-from-version"
+	// ReplicatedFromOriginAnnotation stores the object from which the data originates
+	ReplicatedFromOriginAnnotation  = "replicated-from-origin"
 	// ReplicationAllowedAnnotation explicitely allows replication
 	ReplicationAllowedAnnotation    = "replication-allowed"
 	// ReplicationAllowedNsAnnotation explicitely allows replication to the specified namespace(s)
 	ReplicationAllowedNsAnnotation  = "replication-allowed-namespaces"
+	// ReplicatedFromAllowedAnnotation stores the replication permissions of the source
+	ReplicatedFromAllowedAnnotation  = "replicated-from-allowed"
 )
 
 var annotationsPrefix = ""
@@ -39,8 +43,10 @@ var annotationRefs = map[string]*string{
 	ReplicatedAtAnnotation:          &ReplicatedAtAnnotation,
 	ReplicatedByAnnotation:          &ReplicatedByAnnotation,
 	ReplicatedFromVersionAnnotation: &ReplicatedFromVersionAnnotation,
+	ReplicatedFromOriginAnnotation:  &ReplicatedFromOriginAnnotation,
 	ReplicationAllowedAnnotation:    &ReplicationAllowedAnnotation,
 	ReplicationAllowedNsAnnotation:  &ReplicationAllowedNsAnnotation,
+	ReplicatedFromAllowedAnnotation: &ReplicatedFromAllowedAnnotation,
 }
 
 // PrefixAnnotations sets the prefix of all the annotations

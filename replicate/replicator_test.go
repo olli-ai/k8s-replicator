@@ -68,7 +68,10 @@ func (*testActions) GetMeta(object interface{}) *metav1.ObjectMeta {
 
 func (a *testActions) Update(client kubernetes.Interface, object interface{}, sourceObject interface{}, annotations map[string]string) (interface{}, error) {
 	target := object.(*testObject)
-	source := sourceObject.(*testObject)
+	data := ""
+	if sourceObject != nil {
+		data = sourceObject.(*testObject).Data
+	}
 	conflict, err := hasConflict(a, &target.Meta)
 	require.NoError(a.T, err)
 	action := &testAction{
@@ -76,7 +79,7 @@ func (a *testActions) Update(client kubernetes.Interface, object interface{}, so
 		Conflict: conflict,
 		Object: testObject{
 			Type: target.Type,
-			Data: source.Data,
+			Data: data,
 			Meta: *target.Meta.DeepCopy(),
 		},
 	}
@@ -90,7 +93,7 @@ func (a *testActions) Update(client kubernetes.Interface, object interface{}, so
 		log.Printf("update conflict %s/%s", target.Meta.Namespace, target.Meta.Name)
 		return nil, fmt.Errorf("conflict %s/%s", target.Meta.Namespace, target.Meta.Name)
 	}
-	log.Printf("updating test %s/%s with data \"%s\"", target.Meta.Namespace, target.Meta.Name, source.Data)
+	log.Printf("updating test %s/%s with data \"%s\"", target.Meta.Namespace, target.Meta.Name, data)
 	return action.Object.Refresh(a), nil
 }
 
@@ -277,11 +280,11 @@ func assertAction(t *testing.T, r *ObjectReplicator, index int, action *testActi
 		assert.Equal(t, action.Object.Meta.ResourceVersion, actions[index].Object.Meta.ResourceVersion, prefix + "Object.Meta.ResourceVersion")
 		testAnnotations := actions[index].Object.Meta.Annotations
 		for k, v := range action.Object.Meta.Annotations {
-			assert.Equalf(t, v, testAnnotations[k], "[%v]Object.Meta.Annotations[\"%v\"]", index, k)
+			assert.Equalf(t, v, testAnnotations[k], "Object.Meta.Annotations[\"%s\"]", k)
 		}
 		testLabels := actions[index].Object.Meta.Labels
 		for k, v := range action.Object.Meta.Labels {
-			assert.Equalf(t, v, testLabels[k], "[%v]Object.Meta.Labels[\"%v\"]", index, k)
+			assert.Equalf(t, v, testLabels[k], "Object.Meta.Labels[\"%s\"]", k)
 		}
 	}
 }
@@ -626,9 +629,28 @@ func TestReplicateFrom_onceSsource(t *testing.T) {
 	})
 	assertStore(t, r, "target-ns", "target", "8")
 	requireActionsLength(t, r, 3)
+
+	r.ObjectDeleted(deleteObject(r, "source-ns", "source"))
+	assertAction(t, r, 3, &testAction{
+		Action: "clear",
+		Object: testObject{
+			Type: "0",
+			Data: "",
+			Meta: metav1.ObjectMeta{
+				Name: "target",
+				Namespace: "target-ns",
+				ResourceVersion: "8",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "",
+					ReplicateOnceVersionAnnotation: "",
+				},
+			},
+		},
+	})
+	requireActionsLength(t, r, 4)
 }
 
-func TestReplicateFrom_onceTtarget(t *testing.T) {
+func TestReplicateFrom_onceTarget(t *testing.T) {
 	r := createTestReplicator(t, ReplicatorOptions{AllowAll: true})
 	source := updateObject(r, "source-ns", "source", M{})
 	r.ObjectAdded(source)
@@ -780,6 +802,222 @@ func TestReplicateFrom_invalid(t *testing.T) {
 		},
 	})
 	assertStore(t, r, "target-ns", "target", "7")
+	requireActionsLength(t, r, 2)
+}
+
+func TestReplicateFrom_chain(t *testing.T) {
+	r := createTestReplicator(t, ReplicatorOptions{})
+	chain1 := updateObject(r, "chain-ns", "chain-1", M{
+		ReplicationAllowedAnnotation: "true",
+	})
+	r.ObjectAdded(chain1)
+	requireActionsLength(t, r, 0)
+
+	chain2 := updateObject(r, "chain-ns", "chain-2", M{
+		ReplicateFromAnnotation: "chain-1",
+		ReplicationAllowedNsAnnotation: "chain-.*",
+	})
+	r.ObjectAdded(chain2)
+	assertAction(t, r, 0, &testAction{
+		Action: "update",
+		Object: testObject{
+			Type: "1",
+			Data: "0",
+			Meta: metav1.ObjectMeta{
+				Name: "chain-2",
+				Namespace: "chain-ns",
+				ResourceVersion: "1",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "0",
+					ReplicatedFromAllowedAnnotation: ".*",
+					ReplicatedFromOriginAnnotation: "chain-ns/chain-1",
+				},
+			},
+		},
+	})
+	requireActionsLength(t, r, 1)
+
+	chain3 := updateObject(r, "chain-ns", "chain-3", M{
+		ReplicateFromAnnotation: "chain-ns/chain-2",
+		ReplicationAllowedNsAnnotation: "chain-ns",
+	})
+	r.ObjectAdded(chain3)
+	assertAction(t, r, 1, &testAction{
+		Action: "update",
+		Object: testObject{
+			Type: "3",
+			Data: "0",
+			Meta: metav1.ObjectMeta{
+				Name: "chain-3",
+				Namespace: "chain-ns",
+				ResourceVersion: "3",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "2",
+					ReplicatedFromAllowedAnnotation: "chain-.*",
+					ReplicatedFromOriginAnnotation: "chain-ns/chain-1",
+				},
+			},
+		},
+	})
+	requireActionsLength(t, r, 2)
+
+	chain4 := updateObject(r, "chain-ns", "chain-4", M{
+		ReplicateFromAnnotation: "chain-3",
+		ReplicationAllowedNsAnnotation: "chain-ns",
+		ReplicateOnceAnnotation: "true",
+	})
+	r.ObjectAdded(chain4)
+	assertAction(t, r, 2, &testAction{
+		Action: "update",
+		Object: testObject{
+			Type: "5",
+			Data: "0",
+			Meta: metav1.ObjectMeta{
+				Name: "chain-4",
+				Namespace: "chain-ns",
+				ResourceVersion: "5",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "4",
+					ReplicatedFromAllowedAnnotation: "chain-ns",
+					ReplicatedFromOriginAnnotation: "",
+				},
+			},
+		},
+	})
+	requireActionsLength(t, r, 3)
+
+	chain5 := updateObject(r, "chain-ns", "chain-5", M{
+		ReplicateFromAnnotation: "chain-4",
+		ReplicationAllowedNsAnnotation: "other-ns",
+	})
+	r.ObjectAdded(chain5)
+	assertAction(t, r, 3, &testAction{
+		Action: "update",
+		Object: testObject{
+			Type: "7",
+			Data: "0",
+			Meta: metav1.ObjectMeta{
+				Name: "chain-5",
+				Namespace: "chain-ns",
+				ResourceVersion: "7",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "6",
+					ReplicatedFromAllowedAnnotation: "chain-ns",
+					ReplicatedFromOriginAnnotation: "chain-ns/chain-4",
+				},
+			},
+		},
+	})
+	requireActionsLength(t, r, 4)
+
+	chain6 := updateObject(r, "other-ns", "chain-6", M{
+		ReplicateFromAnnotation: "chain-ns/chain-5",
+	})
+	r.ObjectAdded(chain6)
+	requireActionsLength(t, r, 4)
+
+	r.ObjectDeleted(deleteObject(r, "chain-ns", "chain-3"))
+	assertAction(t, r, 4, &testAction{
+		Action: "clear",
+		Object: testObject{
+			Type: "5",
+			Data: "",
+			Meta: metav1.ObjectMeta{
+				Name: "chain-4",
+				Namespace: "chain-ns",
+				ResourceVersion: "6",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "",
+					ReplicatedFromAllowedAnnotation: "",
+					ReplicatedFromOriginAnnotation: "",
+				},
+			},
+		},
+	})
+	requireActionsLength(t, r, 5)
+
+	r.ObjectAdded(getObject(r, "chain-ns", "chain-4"))
+	assertAction(t, r, 5, &testAction{
+		Action: "clear",
+		Object: testObject{
+			Type: "7",
+			Data: "",
+			Meta: metav1.ObjectMeta{
+				Name: "chain-5",
+				Namespace: "chain-ns",
+				ResourceVersion: "8",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "",
+					ReplicatedFromAllowedAnnotation: "",
+					ReplicatedFromOriginAnnotation: "",
+				},
+			},
+		},
+	})
+	requireActionsLength(t, r, 6)
+}
+
+func TestReplicateFrom_loop(t *testing.T) {
+	r := createTestReplicator(t, ReplicatorOptions{})
+	loop1 := updateObject(r, "loop-ns", "loop-1", M{
+		ReplicationAllowedAnnotation: "true",
+	})
+	r.ObjectAdded(loop1)
+	requireActionsLength(t, r, 0)
+
+	loop2 := updateObject(r, "loop-ns", "loop-2", M{
+		ReplicateFromAnnotation: "loop-1",
+		ReplicationAllowedAnnotation: "true",
+	})
+	r.ObjectAdded(loop2)
+	assertAction(t, r, 0, &testAction{
+		Action: "update",
+		Object: testObject{
+			Type: "1",
+			Data: "0",
+			Meta: metav1.ObjectMeta{
+				Name: "loop-2",
+				Namespace: "loop-ns",
+				ResourceVersion: "1",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "0",
+					ReplicatedFromAllowedAnnotation: ".*",
+					ReplicatedFromOriginAnnotation: "loop-ns/loop-1",
+				},
+			},
+		},
+	})
+	requireActionsLength(t, r, 1)
+
+	loop1 = updateObject(r, "loop-ns", "loop-1", M{
+		ReplicateFromAnnotation: "loop-2",
+		ReplicationAllowedAnnotation: "true",
+		ReplicatedFromVersionAnnotation: "test",
+		ReplicatedFromAllowedAnnotation: ".*",
+	})
+	r.ObjectAdded(loop1)
+	assertAction(t, r, 1, &testAction{
+		Action: "update",
+		Object: testObject{
+			Type: "1",
+			Data: "3",
+			Meta: metav1.ObjectMeta{
+				Name: "loop-2",
+				Namespace: "loop-ns",
+				ResourceVersion: "2",
+				Annotations: M{
+					ReplicatedFromVersionAnnotation: "3",
+					ReplicatedFromAllowedAnnotation: ".*",
+					ReplicatedFromOriginAnnotation: "loop-ns/loop-1",
+				},
+			},
+		},
+	})
+	requireActionsLength(t, r, 2)
+
+	r.ObjectAdded(getObject(r, "loop-ns", "loop-1"))
+	requireActionsLength(t, r, 2)
+	r.ObjectAdded(getObject(r, "loop-ns", "loop-2"))
 	requireActionsLength(t, r, 2)
 }
 
@@ -1666,6 +1904,8 @@ func TestReplicateToFrom_scenario(t *testing.T) {
 					ReplicatedByAnnotation: "source-ns/source",
 					ReplicateFromAnnotation: "data-ns/data",
 					ReplicatedFromVersionAnnotation: "0",
+					ReplicatedFromAllowedAnnotation: ".*",
+					ReplicatedFromOriginAnnotation: "data-ns/data",
 				},
 			},
 		},
@@ -1728,6 +1968,7 @@ func TestReplicateToFrom_annotations(t *testing.T) {
 		},
 	})
 	assertStore(t, r, "target-ns", "target", "1")
+	r.ObjectAdded(getObject(r, "target-ns", "target"))
 	requireActionsLength(t, r, 1)
 
 	source = updateObject(r, "source-ns", "source", M{
@@ -1754,6 +1995,7 @@ func TestReplicateToFrom_annotations(t *testing.T) {
 		},
 	})
 	assertStore(t, r, "target-ns", "target", "3")
+	r.ObjectAdded(getObject(r, "target-ns", "target"))
 	requireActionsLength(t, r, 2)
 
 	source = updateObject(r, "source-ns", "source", M{
@@ -1778,7 +2020,185 @@ func TestReplicateToFrom_annotations(t *testing.T) {
 		},
 	})
 	assertStore(t, r, "target-ns", "target", "5")
+	r.ObjectAdded(getObject(r, "target-ns", "target"))
 	requireActionsLength(t, r, 3)
+
+	source = updateObject(r, "source-ns", "source", M{
+		ReplicateToAnnotation: "target-ns/target",
+		ReplicateFromAnnotation: "other-ns/other",
+		ReplicationAllowedAnnotation: "true",
+		ReplicationAllowedNsAnnotation: "any-ns",
+	})
+	r.ObjectAdded(source)
+	assertAction(t, r, 3, &testAction{
+		Action: "install",
+		Object: testObject{
+			Type: "6",
+			Data: "",
+			Meta: metav1.ObjectMeta{
+				Name: "target",
+				Namespace: "target-ns",
+				ResourceVersion: "5",
+				Annotations: M{
+					ReplicatedByAnnotation: "source-ns/source",
+					ReplicateFromAnnotation: "other-ns/other",
+					ReplicationAllowedAnnotation: "true",
+					ReplicationAllowedNsAnnotation: "any-ns",
+				},
+			},
+		},
+	})
+	assertStore(t, r, "target-ns", "target", "7")
+	r.ObjectAdded(getObject(r, "target-ns", "target"))
+	requireActionsLength(t, r, 4)
+
+	other := updateObject(r, "other-ns", "other", M{
+		ReplicationAllowedAnnotation: "true",
+		ReplicationAllowedNsAnnotation: "target-ns,every-ns",
+		ReplicateOnceAnnotation: "true",
+	})
+	r.ObjectAdded(other)
+	assertAction(t, r, 4, &testAction{
+		Action: "update",
+		Object: testObject{
+			Type: "6",
+			Data: "8",
+			Meta: metav1.ObjectMeta{
+				Name: "target",
+				Namespace: "target-ns",
+				ResourceVersion: "7",
+				Annotations: M{
+					ReplicatedByAnnotation: "source-ns/source",
+					ReplicateFromAnnotation: "other-ns/other",
+					ReplicationAllowedAnnotation: "true",
+					ReplicationAllowedNsAnnotation: "any-ns",
+					ReplicatedFromVersionAnnotation: "8",
+					ReplicatedFromAllowedAnnotation: "target-ns,every-ns",
+				},
+			},
+		},
+	})
+	return
+	assertStore(t, r, "target-ns", "target", "9")
+	r.ObjectAdded(getObject(r, "target-ns", "target"))
+	requireActionsLength(t, r, 5)
+
+	source = updateObject(r, "source-ns", "source", M{
+		ReplicateToAnnotation: "target-ns/target",
+		ReplicateFromAnnotation: "other-ns/other",
+		ReplicationAllowedAnnotation: "true",
+		ReplicationAllowedNsAnnotation: "what-ns",
+	})
+	r.ObjectAdded(source)
+	assertAction(t, r, 5, &testAction{
+		Action: "install",
+		Object: testObject{
+			Type: "10",
+			Data: "8",
+			Meta: metav1.ObjectMeta{
+				Name: "target",
+				Namespace: "target-ns",
+				ResourceVersion: "9",
+				Annotations: M{
+					ReplicatedByAnnotation: "source-ns/source",
+					ReplicateFromAnnotation: "other-ns/other",
+					ReplicationAllowedAnnotation: "true",
+					ReplicationAllowedNsAnnotation: "any-ns",
+					ReplicatedFromVersionAnnotation: "8",
+					ReplicatedFromAllowedAnnotation: "target-ns,every-ns",
+				},
+			},
+		},
+	})
+	assertStore(t, r, "target-ns", "target", "11")
+	r.ObjectAdded(getObject(r, "target-ns", "target"))
+	requireActionsLength(t, r, 6)
+
+	other = updateObject(r, "other-ns", "other", M{
+		ReplicationAllowedAnnotation: "true",
+		ReplicationAllowedNsAnnotation: "target-ns,that-ns",
+		ReplicateOnceAnnotation: "true",
+	})
+	r.ObjectAdded(other)
+	assertAction(t, r, 6, &testAction{
+		Action: "update",
+		Object: testObject{
+			Type: "10",
+			Data: "8",
+			Meta: metav1.ObjectMeta{
+				Name: "target",
+				Namespace: "target-ns",
+				ResourceVersion: "11",
+				Annotations: M{
+					ReplicatedByAnnotation: "source-ns/source",
+					ReplicateFromAnnotation: "other-ns/other",
+					ReplicationAllowedAnnotation: "true",
+					ReplicationAllowedNsAnnotation: "any-ns",
+					ReplicatedFromVersionAnnotation: "8",
+					ReplicatedFromAllowedAnnotation: "target-ns,that-ns",
+				},
+			},
+		},
+	})
+	assertStore(t, r, "target-ns", "target", "13")
+	r.ObjectAdded(getObject(r, "target-ns", "target"))
+	requireActionsLength(t, r, 7)
+
+	source = updateObject(r, "source-ns", "source", M{
+		ReplicateToAnnotation: "target-ns/target",
+		ReplicateFromAnnotation: "other-ns/other",
+		ReplicationAllowedNsAnnotation: "what-ns",
+	})
+	r.ObjectAdded(source)
+	assertAction(t, r, 7, &testAction{
+		Action: "install",
+		Object: testObject{
+			Type: "14",
+			Data: "8",
+			Meta: metav1.ObjectMeta{
+				Name: "target",
+				Namespace: "target-ns",
+				ResourceVersion: "13",
+				Annotations: M{
+					ReplicatedByAnnotation: "source-ns/source",
+					ReplicateFromAnnotation: "other-ns/other",
+					ReplicationAllowedNsAnnotation: "any-ns",
+					ReplicatedFromVersionAnnotation: "8",
+					ReplicatedFromAllowedAnnotation: "target-ns,that-ns",
+				},
+			},
+		},
+	})
+	assertStore(t, r, "target-ns", "target", "15")
+	r.ObjectAdded(getObject(r, "target-ns", "target"))
+	requireActionsLength(t, r, 8)
+
+	other = updateObject(r, "other-ns", "other", M{
+		ReplicationAllowedAnnotation: "true",
+		ReplicateOnceAnnotation: "true",
+	})
+	r.ObjectAdded(other)
+	assertAction(t, r, 7, &testAction{
+		Action: "update",
+		Object: testObject{
+			Type: "14",
+			Data: "8",
+			Meta: metav1.ObjectMeta{
+				Name: "target",
+				Namespace: "target-ns",
+				ResourceVersion: "15",
+				Annotations: M{
+					ReplicatedByAnnotation: "source-ns/source",
+					ReplicateFromAnnotation: "other-ns/other",
+					ReplicationAllowedNsAnnotation: "any-ns",
+					ReplicatedFromVersionAnnotation: "12",
+				},
+			},
+		},
+	})
+	assertStore(t, r, "target-ns", "target", "17")
+	r.ObjectAdded(getObject(r, "target-ns", "target"))
+	requireActionsLength(t, r, 8)
 }
 
 func Test_newFilledInformer(t *testing.T) {

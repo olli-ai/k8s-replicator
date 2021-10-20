@@ -431,31 +431,61 @@ func (r *ObjectReplicator) replicateObject(object interface{}, sourceObject  int
 		log.Printf("replication of %s %s/%s is cancelled: %s", r.Name, meta.Namespace, meta.Name, err)
 		return err
 	}
+	// the source doesn't get its data from
+	if _, ok := sourceMeta.Annotations[ReplicateFromAnnotation]; !ok {
+	// the source is cleared
+	} else if _, ok := sourceMeta.Annotations[ReplicatedFromVersionAnnotation]; !ok {
+		log.Printf("replication of %s %s/%s is cancelled: source %s/%s is cleared", r.Name, meta.Namespace, meta.Name, sourceMeta.Namespace, sourceMeta.Name)
+		return r.doClearObject(object)
+	}
 	// check if replication is needed
-	if ok, _, err := r.needsDataUpdate(meta, sourceMeta); !ok {
+	update, once, err := r.needsDataUpdate(meta, sourceMeta);
+	if !update && !once {
 		log.Printf("replication of %s %s/%s is skipped: %s", r.Name, meta.Namespace, meta.Name, err)
 		return err
 	}
-	// build the annotations
-	annotations := map[string]string{}
-	for key, val := range meta.Annotations {
-		annotations[key] = val
+	// check if the "replicated-from-allowed" annotation needs an uupdate
+	annotations := r.getReplicationAnnotations(meta, sourceMeta)
+	if once {
+		valOld, okOld := meta.Annotations[ReplicatedFromAllowedAnnotation]
+		valNew, okNew := meta.Annotations[ReplicatedFromAllowedAnnotation]
+		if okOld == okNew && valOld == valNew {
+			log.Printf("replication of %s %s/%s is skipped: %s", r.Name, meta.Namespace, meta.Name, err)
+			return err
+		}
 	}
-	annotations[ReplicatedAtAnnotation] = time.Now().Format(time.RFC3339)
-	annotations[ReplicatedFromVersionAnnotation] = sourceMeta.ResourceVersion
-	if val, ok := sourceMeta.Annotations[ReplicateOnceVersionAnnotation]; ok {
-		annotations[ReplicateOnceVersionAnnotation] = val
+
+	var newObject interface{}
+	if update {
+		updateSMap(annotations, sMap{
+			ReplicatedAtAnnotation:          time.Now().Format(time.RFC3339),
+			ReplicatedFromVersionAnnotation: sourceMeta.ResourceVersion,
+		})
+		transferSMap(annotations, sourceMeta.Annotations, sMap{
+			ReplicateOnceVersionAnnotation: ReplicateOnceVersionAnnotation,
+		})
+		// replicate data
+		log.Printf("replicating %s %s/%s: replicating data", r.Name, meta.Namespace, meta.Name)
+		newObject, err = r.Update(r.client, object, sourceObject, annotations)
 	} else {
-		delete(annotations, ReplicateOnceVersionAnnotation)
+		// replicate annotations only
+		log.Printf("replicating %s %s/%s: replicating annotations", r.Name, meta.Namespace, meta.Name)
+		newObject, err = r.Update(r.client, object, nil, annotations)
 	}
-	// replicate it
-	newObject, err := r.Update(r.client, object, sourceObject, annotations)
-	// update the object store in advance, to avoid being disturbed later
+	// update the object store in advance
 	if err == nil {
 		err = r.objectStore.Update(newObject)
 	}
 	return err
 }
+
+type installAction int
+const (
+	installNoop installAction = iota
+	installFrom
+	installAnnotations
+	installData
+)
 
 // Repliates a resource that has a replicate-to annotation to its target
 // Pass either target string or targetObject object
@@ -463,27 +493,27 @@ func (r *ObjectReplicator) installObject(target string, targetObject interface{}
 	var targetMeta *metav1.ObjectMeta
 	sourceMeta := r.GetMeta(sourceObject)
 	var targetSplit []string // similar to target, but splitted in 2
+	var err error
+	var ok bool
 	// targetObject was not passed, check if it exists
 	if targetObject == nil {
 		targetSplit = strings.SplitN(target, "/", 2)
 		// invalid target
 		if len(targetSplit) != 2 {
-			err := fmt.Errorf("illformed annotation %s in %s %s/%s: expected namespace/name, got %s",
+			err = fmt.Errorf("illformed annotation %s in %s %s/%s: expected namespace/name, got %s",
 				ReplicatedByAnnotation, r.Name, sourceMeta.Namespace, sourceMeta.Name, target)
 			log.Printf("%s", err)
 			return err
 		}
 
-		var exists bool
-		var err error
 		// error while getting the target
-		if targetObject, targetMeta, exists, err = r.getFromStore(target); err != nil {
+		if targetObject, targetMeta, ok, err = r.getFromStore(target); err != nil {
 			log.Printf("could not get %s %s: %s", r.Name, target, err)
 			return err
 		// the target exists already
-		} else if exists {
+		} else if ok {
 			// check if target was created by replication from source
-			if ok, err := r.isReplicatedBy(targetMeta, sourceMeta); !ok {
+			if ok, err = r.isReplicatedBy(targetMeta, sourceMeta); !ok {
 				log.Printf("replication of %s %s/%s is cancelled: %s",
 					r.Name, sourceMeta.Namespace, sourceMeta.Name, err)
 				return err
@@ -494,37 +524,71 @@ func (r *ObjectReplicator) installObject(target string, targetObject interface{}
 		targetMeta = r.GetMeta(targetObject)
 		targetSplit = []string{targetMeta.Namespace, targetMeta.Name}
 	}
-	// the data must come from another object
-	if source, ok := resolveAnnotation(sourceMeta, ReplicateFromAnnotation); ok {
-		if targetMeta != nil {
-			// Check if needs an annotations update
-			if ok, err := r.needsFromAnnotationsUpdate(targetMeta, sourceMeta); err != nil {
-				log.Printf("replication of %s %s/%s is cancelled: %s",
-					r.Name, sourceMeta.Namespace, sourceMeta.Name, err)
-				return err
 
-			} else if !ok {
-				return nil
-			}
+	action := installNoop
+	source, okFrom := resolveAnnotation(sourceMeta, ReplicateFromAnnotation);
+
+	// the data must come from another object
+	if okFrom {
+		// target doesn't exist yet, replicate it
+		if targetMeta == nil {
+			action = installFrom
+		// from annotation has changed, replicate again
+		} else if ok, err = r.needsFromAnnotationsUpdate(targetMeta, sourceMeta); ok {
+			action = installFrom
+		} else if err != nil {
+		// allowed annotations should be updated
+		} else if ok, err = r.needsAllowedAnnotationsUpdate(targetMeta, sourceMeta); ok {
+			action = installAnnotations
 		}
+	} else {
+		var once bool
+		// target doesn't exist yet, replicate it
+		if targetMeta == nil {
+			action = installData
+		// the target was previously replicated from another source, replicate again
+		} else if _, ok = targetMeta.Annotations[ReplicateFromAnnotation]; ok {
+			action = installData
+		// data has changed, replicate again
+		} else if ok, once, err = r.needsDataUpdate(targetMeta, sourceMeta); ok {
+			action = installData
+		// not an error related to "once" annotation, keep it
+		} else if !once {
+		// allowed annotations should be updated
+		} else if ok, err2 := r.needsAllowedAnnotationsUpdate(targetMeta, sourceMeta); ok {
+			action = installAnnotations
+		// return that error instead
+		} else if err2 != nil {
+			err = err2
+		}
+	}
+	if err != nil {
+		log.Printf("replication of %s %s/%s is cancelled: %s",
+			r.Name, sourceMeta.Namespace, sourceMeta.Name, err)
+	}
+
+	var newObject interface{}
+	switch action {
+	case installNoop:
+		return nil
+
+	case installFrom:
 		// create a new meta with all the annotations
 		copyMeta := metav1.ObjectMeta{
 			Namespace:   targetSplit[0],
 			Name:        targetSplit[1],
-			Labels:      make(map[string]string, len(r.Labels)),
-			Annotations: make(map[string]string, 3),
+			Labels:      cloneSMap(r.Labels),
+			Annotations: sMap{
+				ReplicatedByAnnotation:  fmt.Sprintf("%s/%s",
+					sourceMeta.Namespace, sourceMeta.Name),
+				ReplicateFromAnnotation: source,
+			},
 		}
-		// copy the labels
-		for key, value := range r.Labels {
-			copyMeta.Labels[key] = value
-		}
-		// add the annotations
-		copyMeta.Annotations[ReplicatedByAnnotation] = fmt.Sprintf("%s/%s",
-			sourceMeta.Namespace, sourceMeta.Name)
-		copyMeta.Annotations[ReplicateFromAnnotation] = source
-		if val, ok := sourceMeta.Annotations[ReplicateOnceAnnotation]; ok {
-			copyMeta.Annotations[ReplicateOnceAnnotation] = val
-		}
+		transferSMap(copyMeta.Annotations, sourceMeta.Annotations, sMap{
+			ReplicateOnceAnnotation:        ReplicateOnceAnnotation,
+			ReplicationAllowedAnnotation:   ReplicationAllowedAnnotation,
+			ReplicationAllowedNsAnnotation: ReplicationAllowedNsAnnotation,
+		})
 		// Needs ResourceVersion for update
 		if targetMeta != nil {
 			copyMeta.ResourceVersion = targetMeta.ResourceVersion
@@ -532,90 +596,49 @@ func (r *ObjectReplicator) installObject(target string, targetObject interface{}
 
 		log.Printf("installing %s %s/%s: updating replicate-from annotations", r.Name, copyMeta.Namespace, copyMeta.Name)
 		// install it, but keeps the original data
-		newObject, err := r.Install(r.client, &copyMeta, sourceObject, targetObject)
-		// update the object store in advance, to avoid being disturbed later
-		if err == nil {
-			err = r.objectStore.Update(newObject)
-		}
-		return err
-	}
-	// the data comes directly from the source
-	if targetMeta != nil {
-		// the target was previously replicated from another source
-		// replication is required
-		if _, ok := targetMeta.Annotations[ReplicateFromAnnotation]; ok {
-		// checks that the target is up to date
-		} else if ok, once, err := r.needsDataUpdate(targetMeta, sourceMeta); !ok {
-			// check that the target needs replication-allowed annotations update
-			if (!once) {
-			} else if ok, err2 := r.needsAllowedAnnotationsUpdate(targetMeta, sourceMeta); err2 != nil {
-				err = err2
-			} else if ok {
-				err = nil
-			}
-			if (err != nil) {
-				log.Printf("replication of %s %s/%s is skipped: %s",
-					r.Name, sourceMeta.Namespace, sourceMeta.Name, err)
-				return err
-			}
-			// copy the target but update replication-allowed annotations
-			copyMeta := targetMeta.DeepCopy()
-			if val, ok := sourceMeta.Annotations[ReplicationAllowedAnnotation]; ok {
-				copyMeta.Annotations[ReplicationAllowedAnnotation] = val
-			} else {
-				delete(copyMeta.Annotations, ReplicationAllowedAnnotation)
-			}
-			if val, ok := sourceMeta.Annotations[ReplicationAllowedNsAnnotation]; ok {
-				copyMeta.Annotations[ReplicationAllowedNsAnnotation] = val
-			} else {
-				delete(copyMeta.Annotations, ReplicationAllowedNsAnnotation)
-			}
+		newObject, err = r.Install(r.client, &copyMeta, sourceObject, targetObject)
 
-			log.Printf("installing %s %s/%s: updating replication-allowed annotations", r.Name, copyMeta.Namespace, copyMeta.Name)
-			// install it with the original data
-			newObject, err := r.Install(r.client, copyMeta, sourceObject, targetObject)
-			// update the object store in advance, to avoid being disturbed later
-			if err == nil {
-				err = r.objectStore.Update(newObject)
-			}
-			return err
+	case installData:
+		// create a new meta with all the annotations
+		copyMeta := metav1.ObjectMeta{
+			Namespace:   targetSplit[0],
+			Name:        targetSplit[1],
+				Labels:      cloneSMap(r.Labels),
+			Annotations: sMap{
+				ReplicatedAtAnnotation:          time.Now().Format(time.RFC3339),
+				ReplicatedByAnnotation:          fmt.Sprintf("%s/%s",
+					sourceMeta.Namespace, sourceMeta.Name),
+				ReplicatedFromVersionAnnotation: sourceMeta.ResourceVersion,
+			},
 		}
-	}
-	// create a new meta with all the annotations
-	copyMeta := metav1.ObjectMeta{
-		Namespace:   targetSplit[0],
-		Name:        targetSplit[1],
-		Labels:      make(map[string]string, len(r.Labels)),
-		Annotations: make(map[string]string, 6),
-	}
-	// copy the labels
-	for key, value := range r.Labels {
-		copyMeta.Labels[key] = value
-	}
-	// add the annotations
-	copyMeta.Annotations[ReplicatedAtAnnotation] = time.Now().Format(time.RFC3339)
-	copyMeta.Annotations[ReplicatedByAnnotation] = fmt.Sprintf("%s/%s",
-		sourceMeta.Namespace, sourceMeta.Name)
-	copyMeta.Annotations[ReplicatedFromVersionAnnotation] = sourceMeta.ResourceVersion
-	if val, ok := sourceMeta.Annotations[ReplicateOnceVersionAnnotation]; ok {
-		copyMeta.Annotations[ReplicateOnceVersionAnnotation] = val
-	}
-	// replicate authorization annotations too
-	if val, ok := sourceMeta.Annotations[ReplicationAllowedAnnotation]; ok {
-		copyMeta.Annotations[ReplicationAllowedAnnotation] = val
-	}
-	if val, ok := sourceMeta.Annotations[ReplicationAllowedNsAnnotation]; ok {
-		copyMeta.Annotations[ReplicationAllowedNsAnnotation] = val
-	}
-	// Needs ResourceVersion for update
-	if targetMeta != nil {
-		copyMeta.ResourceVersion = targetMeta.ResourceVersion
-	}
+		transferSMap(copyMeta.Annotations, sourceMeta.Annotations, sMap{
+			ReplicateOnceAnnotation:        ReplicateOnceAnnotation,
+			ReplicateOnceVersionAnnotation: ReplicateOnceVersionAnnotation,
+			ReplicationAllowedAnnotation:   ReplicationAllowedAnnotation,
+			ReplicationAllowedNsAnnotation: ReplicationAllowedNsAnnotation,
+		})
+		// Needs ResourceVersion for update
+		if targetMeta != nil {
+			copyMeta.ResourceVersion = targetMeta.ResourceVersion
+		}
 
-	log.Printf("installing %s %s/%s: updating data", r.Name, copyMeta.Namespace, copyMeta.Name)
-	// install it with the source data
-	newObject, err := r.Install(r.client, &copyMeta, sourceObject, sourceObject)
-	// update the object store in advance, to avoid being disturbed later
+		log.Printf("installing %s %s/%s: updating data", r.Name, copyMeta.Namespace, copyMeta.Name)
+		// install it with the source data
+		newObject, err = r.Install(r.client, &copyMeta, sourceObject, sourceObject)
+
+	case installAnnotations:
+		// copy the target but update replication-allowed annotations
+		copyMeta := targetMeta.DeepCopy()
+		transferSMap(copyMeta.Annotations, sourceMeta.Annotations, sMap{
+			ReplicationAllowedAnnotation:   ReplicationAllowedAnnotation,
+			ReplicationAllowedNsAnnotation: ReplicationAllowedNsAnnotation,
+		})
+
+		log.Printf("installing %s %s/%s: updating replication-allowed annotations", r.Name, copyMeta.Namespace, copyMeta.Name)
+		// install it with the original data
+		newObject, err = r.Install(r.client, copyMeta, sourceObject, targetObject)
+	}
+	// update the object store in advance
 	if err == nil {
 		err = r.objectStore.Update(newObject)
 	}
@@ -804,22 +827,29 @@ func (r *ObjectReplicator) clearObject(key string, sourceObject interface{}) (bo
 // Actually clear the object, no further check needed
 func (r *ObjectReplicator) doClearObject(object interface{}) error {
 	meta := r.GetMeta(object)
-
-	if _, ok := meta.Annotations[ReplicatedFromVersionAnnotation]; !ok {
-		log.Printf("%s %s/%s is already up-to-date", r.Name, meta.Namespace, meta.Name)
+	cleared := false
+	// build the annotations
+	annotations := cloneSMap(meta.Annotations)
+	for _, annotation := range []string{
+		ReplicatedFromVersionAnnotation,
+		ReplicateOnceVersionAnnotation,
+		ReplicatedFromAllowedAnnotation,
+		ReplicatedFromOriginAnnotation,
+	} {
+		if _, ok := annotations[annotation]; ok {
+			delete(annotations, annotation)
+			cleared = true
+		}
+	}
+	// check if anything was changed
+	if !cleared {
+		log.Printf("%s %s/%s is already cleared", r.Name, meta.Namespace, meta.Name)
 		return nil
 	}
-	// build the annotations
-	annotations := map[string]string{}
-	for key, val := range meta.Annotations {
-		annotations[key] = val
-	}
+	// clear the object
 	annotations[ReplicatedAtAnnotation] = time.Now().Format(time.RFC3339)
-	delete(annotations, ReplicatedFromVersionAnnotation)
-	delete(annotations, ReplicateOnceVersionAnnotation)
-
 	newObject, err := r.Clear(r.client, object, annotations)
-	// update the object store in advance, to avoid being disturbed later
+	// update the object store in advance
 	if err == nil {
 		err = r.objectStore.Update(newObject)
 	}
@@ -848,7 +878,7 @@ func (r *ObjectReplicator) deleteObject(key string, sourceObject interface{}) (b
 // Actually delete the object, no further check needed
 func (r *ObjectReplicator) doDeleteObject(object interface{}) error {
 	err := r.Delete(r.client, object)
-	// update the object store in advance, to avoid being disturbed later
+	// update the object store in advance
 	if err == nil {
 		err = r.objectStore.Delete(object)
 	}

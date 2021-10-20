@@ -61,14 +61,14 @@ data: {}
 ```
 
 At leat one of the two annotations is required (if `--allow-all` is not used):
-  - `k8s-replicator/replication-allowed`: Set it to `"true"` to explicitely allow replication, or `"false"` to explicitely diswallow it
+  - `k8s-replicator/replication-allowed`: Set it to `"true"` to explicitely allow replication, or `"false"` to explicitely disallow it
   - `k8s-replicator/replication-allowed-namespaces`: a comma separated list of namespaces or namespace patterns to explicitely allow. ex: `"my-namespace,test-namespace-[0-9]+"`
 
 Other annotations are:
   - `k8s-replicator/replicate-once`: Set it to `"true"` for being replicated only once, no matter future changes. Can be useful if the secret is a randomly generated password, but you don't want the local copies to change anymore.
   - `k8s-replicator/replicate-once-version`: When a different version is set, this secret or confingMap is replicated again, even if replicated once. It allows a thinner control on the `k8s-replicator/replicate-once` annotation. Can be any string.
 
-The content of the target secret of configMap will be cleared if the source does not exist, does not allow replication, or is deleted.
+The content of the target secret or configMap will be cleared if the source does not exist, does not allow replication, or is deleted.
 
 ### Replicating a secret or configMap to other locations
 
@@ -94,6 +94,16 @@ Other annotations are:
 The labels given to any created target secret or configMap can be configured with the `--create-with-labels`. Replication will be cancelled if the target secret or configMap already exists but was not created by replication from this source. However, as soon as that existing target is deleted, it will be replaced by a replication of the source. As soon as any target namespace is created, required target secrets and configMaps are created.
 
 Once the source secret or configMap is deleted or its annotations are changed, the target is deleted.
+
+### Chain of replications
+
+It is possible to replicate a secret or configMap already replicated from a source:
+
+A secret or configMap created thanks to the `k8s-replicator/replicate-to` annotation inherits from its source's `k8s-replicator/replication-allowed` and `k8s-replicator/replication-allowed-namespaces` annotations. These annotations are used to allow or disallow replication.
+
+A secret or configMap replicated thanks to the `k8s-replicator/replicate-from` annotation can define its own `k8s-replicator/replication-allowed` and `k8s-replicator/replication-allowed-namespaces` annotations. These annotations are used, in combination with the source's annotations, to allow or disallow replication.
+
+All secrets and configMaps further on the replications chain will be cleared when the chain is broken.
 
 ### Combining both
 

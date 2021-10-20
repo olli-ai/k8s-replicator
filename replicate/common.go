@@ -13,6 +13,8 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+type sMap = map[string]string
+
 // pattern of a valid kubernetes name
 var validName = regexp.MustCompile(`^[0-9a-z.-]+$`)
 var validPath = regexp.MustCompile(`^(?:[0-9a-z.-]+/)?[0-9a-z.-]+$`)
@@ -165,13 +167,149 @@ func (r *ReplicatorProps) isReplicationAllowed(object *metav1.ObjectMeta, source
 				sourceObject.Namespace, sourceObject.Name, object.Namespace)
 		}
 	}
-	// source cannot have "replicate-from" annotation
-	if val, ok := resolveAnnotation(sourceObject, ReplicateFromAnnotation); ok {
-		return false, true, fmt.Errorf("source %s/%s is already replicated from %s",
-			sourceObject.Namespace, sourceObject.Name, val)
+	// check if the data comes from another source
+	annotationFrom, ok := resolveAnnotation(sourceObject, ReplicateFromAnnotation)
+	if !ok {
+		return true, false, nil
+	}
+	// check replicated-allow-namespaces annotation
+	val, allowed := sourceObject.Annotations[ReplicatedFromAllowedAnnotation]
+	if !allowed {
+	} else if val == "-" {
+		allowed = false
+	} else if val != ".*" {
+		allowed = false
+		for _, ns := range strings.Split(val, ",") {
+			if ns == "" {
+			// an namespace, allowed if equal
+			} else if validName.MatchString(ns) {
+				if ns == object.Namespace {
+					allowed = true
+				}
+			// a namespace pattern, allowed if matching
+			} else if ok, err := regexp.MatchString(`^(?:`+ns+`)$`, object.Namespace); ok {
+				allowed = true
+			// the pattern is invalid
+			} else if err != nil {
+				return false, false, fmt.Errorf("source %s/%s has compilation error on annotation %s \"%s\": %s",
+					sourceObject.Namespace, sourceObject.Name, ReplicatedFromAllowedAnnotation, ns, err)
+			}
+		}
+	}
+	// the namespace is not allowed
+	if !allowed {
+		return false, true, fmt.Errorf("real source %s does not allow replication to namespace %s",
+			annotationFrom, object.Namespace)
+	}
+
+	if val, ok := sourceObject.Annotations[ReplicatedFromOriginAnnotation]; ok && val == fmt.Sprintf("%s/%s", object.Namespace, object.Name) {
+		return false, false, fmt.Errorf("object %s/%s creates a replication loop when replicating %s/%s",
+			object.Namespace, object.Name, sourceObject.Namespace, sourceObject.Name)
 	}
 
 	return true, false, nil
+}
+
+// Returns the annotations required after replication
+func (r *ReplicatorProps) getReplicationAnnotations(object *metav1.ObjectMeta, sourceObject *metav1.ObjectMeta) map[string]string {
+	annotations := cloneSMap(object.Annotations)
+	_, okFrom := sourceObject.Annotations[ReplicateFromAnnotation]
+	// merge "replication-allowed-namespaces" and "replicated-from-allowed" annotations
+	allowedNsSource, okNsSource := sourceObject.Annotations[ReplicationAllowedNsAnnotation]
+	allowedNsFrom, okNsFrom := sourceObject.Annotations[ReplicatedFromAllowedAnnotation]
+	// data isn't from another source, or all namespaces are allowed already
+	if !okFrom || allowedNsFrom == ".*" {
+		// just keep "replication-allowed-namespaces" annotation
+		if okNsSource {
+			annotations[ReplicatedFromAllowedAnnotation] = allowedNsSource
+		} else {
+			annotations[ReplicatedFromAllowedAnnotation] = ".*"
+		}
+	// no namespace is allowed form the real source
+	} else if !okNsFrom || allowedNsFrom == "-" {
+		annotations[ReplicatedFromAllowedAnnotation] = "-"
+	// no "replication-allowed-namespaces" annotation
+	} else if !okNsSource {
+		annotations[ReplicatedFromAllowedAnnotation] = allowedNsFrom
+	// merge both annotations
+	} else {
+		// used to store patterns-namespaces couples to check after
+		var toChecks [2]struct{
+			patterns   []string
+			namespaces []string
+		}
+		// check wich namespaces are in common in both annotations
+		seen := map[string]bool{}
+		for _, ns := range strings.Split(allowedNsFrom, ",") {
+			seen[ns] = false
+		}
+		namespaces := []string{}
+		for _, ns := range strings.Split(allowedNsSource, ",") {
+			if _, ok := seen[ns]; ok {
+				namespaces = append(namespaces, ns)
+				seen[ns] = true
+			// keep the unmatched namespaces for comparison
+			} else if validName.MatchString(ns) {
+				toChecks[1].namespaces = append(toChecks[1].namespaces, ns)
+			} else {
+				toChecks[0].patterns = append(toChecks[0].patterns, ns)
+			}
+		}
+		// keep the unmatched namespaces for comparison
+		for ns, matched := range seen {
+			if matched {
+			} else if validName.MatchString(ns) {
+				toChecks[0].namespaces = append(toChecks[0].namespaces, ns)
+			} else {
+				toChecks[1].patterns = append(toChecks[1].patterns, ns)
+			}
+		}
+		// try to match patterns and namespaces couples from different annotations
+		for _, toCheck := range toChecks {
+			// no patterns of namespace, nothing to check
+			if len(toCheck.patterns) == 0 || len(toCheck.namespaces) == 0 {
+				continue
+			}
+			// compile all patterns in advance
+			patterns := make([]*regexp.Regexp, 0, len(toCheck.patterns))
+			for _, ns := range toCheck.patterns {
+				if pattern, err := regexp.Compile(`^(?:`+ns+`)$`); err == nil {
+					patterns = append(patterns, pattern)
+				}
+			}
+			// check if each namespace matches any pattern
+			for _, ns := range toCheck.namespaces {
+				for _, pattern := range patterns {
+					if pattern.MatchString(ns) {
+						namespaces = append(namespaces, ns)
+						break
+					}
+				}
+			}
+		}
+		// join the namespaces into the annoation
+		if len(namespaces) > 0 {
+			annotations[ReplicatedFromAllowedAnnotation] = strings.Join(namespaces, ",")
+		} else {
+			annotations[ReplicatedFromAllowedAnnotation] = "-"
+		}
+	}
+	// add the "replicated-from-origin" if needs to avoid loops
+	trackOrigin := true
+	if val, ok := object.Annotations[ReplicateOnceAnnotation]; ok {
+		if ok, err := strconv.ParseBool(val); err == nil && ok {
+			trackOrigin = false
+		}
+	}
+	if !trackOrigin {
+		delete(annotations, ReplicatedFromOriginAnnotation)
+	} else if val, ok := sourceObject.Annotations[ReplicatedFromOriginAnnotation]; ok && okFrom {
+		annotations[ReplicatedFromOriginAnnotation] = val
+	} else {
+		annotations[ReplicatedFromOriginAnnotation] = fmt.Sprintf("%s/%s", sourceObject.Namespace, sourceObject.Name)
+	}
+
+	return annotations
 }
 
 // Checks that data update is needed
@@ -518,5 +656,35 @@ func annotationRefersTo(object *metav1.ObjectMeta, annotation string, reference 
 		return v[0] == reference.Namespace && v[1] == reference.Name
 	} else {
 		return object.Namespace == reference.Namespace && val == reference.Name
+	}
+}
+
+// clones a string map
+func cloneSMap(value map[string]string) map[string]string {
+	copy := make(map[string]string, len(value))
+	for key, val := range(value) {
+		copy[key] = val
+	}
+	return copy
+}
+
+// updates a string map `value` with the string map `update`
+func updateSMap(value, update map[string]string) {
+	for key, val := range(update) {
+		value[key] = val
+	}
+}
+
+// transfers into a the string map `value` the fields from the string map `update`, as listed in `keys`, including deletions
+func transferSMap(value, update, keys map[string]string) {
+	for source, target := range(keys) {
+		if target == "" {
+			target = source
+		}
+		if val, ok := update[source]; ok {
+			value[target] = val
+		} else {
+			delete(value, target)
+		}
 	}
 }

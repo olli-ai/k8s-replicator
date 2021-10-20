@@ -36,32 +36,39 @@ func (*configMapActions) GetMeta(object interface{}) *metav1.ObjectMeta {
 	return &object.(*v1.ConfigMap).ObjectMeta
 }
 
+func copyConfigMapData(configMap *v1.ConfigMap, sourceObject interface{}) {
+	if sourceObject != nil {
+		sourceConfigMap := sourceObject.(*v1.ConfigMap)
+		// copy the data
+		if sourceConfigMap.Data != nil {
+			configMap.Data = make(map[string]string, len(sourceConfigMap.Data))
+			for key, value := range sourceConfigMap.Data {
+				configMap.Data[key] = value
+			}
+		} else {
+			configMap.Data = nil
+		}
+		// copy the binary data
+		if sourceConfigMap.BinaryData != nil {
+			configMap.BinaryData = make(map[string][]byte, len(sourceConfigMap.BinaryData))
+			for key, value := range sourceConfigMap.BinaryData {
+				newValue := make([]byte, len(value))
+				copy(newValue, value)
+				configMap.BinaryData[key] = newValue
+			}
+		} else {
+			configMap.BinaryData = nil
+		}
+	}
+}
+
 func (*configMapActions) Update(client kubernetes.Interface, object interface{}, sourceObject interface{}, annotations map[string]string) (interface{}, error) {
-	sourceConfigMap := sourceObject.(*v1.ConfigMap)
 	// copy the configMap
 	configMap := object.(*v1.ConfigMap).DeepCopy()
 	// set the annotations
 	configMap.Annotations = annotations
 	// copy the data
-	if sourceConfigMap.Data != nil {
-		configMap.Data = make(map[string]string)
-		for key, value := range sourceConfigMap.Data {
-			configMap.Data[key] = value
-		}
-	} else {
-		configMap.Data = nil
-	}
-	// copy the binary data
-	if sourceConfigMap.BinaryData != nil {
-		configMap.BinaryData = make(map[string][]byte)
-		for key, value := range sourceConfigMap.BinaryData {
-			newValue := make([]byte, len(value))
-			copy(newValue, value)
-			configMap.BinaryData[key] = newValue
-		}
-	} else {
-		configMap.BinaryData = nil
-	}
+	copyConfigMapData(configMap, sourceObject)
 
 	log.Printf("updating configMap %s/%s", configMap.Namespace, configMap.Name)
 	// update the configMap
@@ -97,26 +104,8 @@ func (*configMapActions) Install(client kubernetes.Interface, meta *metav1.Objec
 	configMap := v1.ConfigMap{
 		ObjectMeta: *meta,
 	}
-	// if there is data
-	if dataObject != nil {
-		dataConfigMap := dataObject.(*v1.ConfigMap)
-		// copy the data
-		if dataConfigMap.Data != nil {
-			configMap.Data = make(map[string]string)
-			for key, value := range dataConfigMap.Data {
-				configMap.Data[key] = value
-			}
-		}
-		// copy the binary data
-		if dataConfigMap.BinaryData != nil {
-			configMap.BinaryData = make(map[string][]byte)
-			for key, value := range dataConfigMap.BinaryData {
-				newValue := make([]byte, len(value))
-				copy(newValue, value)
-				configMap.BinaryData[key] = newValue
-			}
-		}
-	}
+	// copy the data
+	copyConfigMapData(&configMap, dataObject)
 
 	log.Printf("installing configMap %s/%s", configMap.Namespace, configMap.Name)
 

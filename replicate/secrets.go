@@ -88,21 +88,23 @@ var emptySecretFuncs emptySecretFuncsType = emptySecretFuncsType{
 }
 
 func (*secretActions) Update(client kubernetes.Interface, object interface{}, sourceObject interface{}, annotations map[string]string) (interface{}, error) {
-	sourceSecret := sourceObject.(*v1.Secret)
 	// copy the secret
 	secret := object.(*v1.Secret).DeepCopy()
 	// set the annotations
 	secret.Annotations = annotations
 	// copy the data
-	if sourceSecret.Data != nil {
-		secret.Data = make(map[string][]byte)
-		for key, value := range sourceSecret.Data {
-			newValue := make([]byte, len(value))
-			copy(newValue, value)
-			secret.Data[key] = newValue
+	if sourceObject != nil {
+		sourceSecret := sourceObject.(*v1.Secret)
+		if sourceSecret.Data != nil {
+			secret.Data = make(map[string][]byte, len(sourceSecret.Data))
+			for key, value := range sourceSecret.Data {
+				newValue := make([]byte, len(value))
+				copy(newValue, value)
+				secret.Data[key] = newValue
+			}
+		} else {
+			secret.Data = nil
 		}
-	} else {
-		secret.Data = nil
 	}
 
 	log.Printf("updating secret %s/%s", secret.Namespace, secret.Name)
@@ -150,7 +152,7 @@ func (*secretActions) Install(client kubernetes.Interface, meta *metav1.ObjectMe
 		dataSecret := dataObject.(*v1.Secret)
 		// copy the data
 		if dataSecret.Data != nil {
-			secret.Data = make(map[string][]byte)
+			secret.Data = make(map[string][]byte, len(dataSecret.Data))
 			for key, value := range dataSecret.Data {
 				newValue := make([]byte, len(value))
 				copy(newValue, value)
